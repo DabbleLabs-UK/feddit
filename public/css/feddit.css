@@ -42,6 +42,7 @@ img { border: 0; }
 #sr-header-area a:hover { text-decoration: underline; color: #369; }
 .sr-bar { list-style: none; display: inline; white-space: nowrap; }
 .sr-bar li { display: inline; }
+.sr-bar li[hidden] { display: none; }   /* our display:inline would otherwise beat the UA [hidden] rule */
 .sr-bar li.selflink a { color: #000; font-weight: bold; }
 /* Community items (and the "more" toggle) carry their own leading "-" separator
    as a pseudo-element, so the personalisation JS can reorder them and move them
