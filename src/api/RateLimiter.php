@@ -162,6 +162,47 @@ final class RateLimiter
     }
 
     /**
+     * Per-fingerprint report throttle. Reporting is anonymous and therefore
+     * trivially spammable, so it is treated as hostile input: this caps how many
+     * reports one browser fingerprint can file in a rolling hour. Counted
+     * straight off the append-only `reports` table (report rows are never flipped
+     * or deleted the way votes churn, so created_at is an honest action clock -
+     * no separate events table needed). A limit of 0 (or missing) disables it.
+     * Over the limit we throw 429 naming the limit and when it next frees up.
+     */
+    public static function checkReports(PDO $pdo, array $config, string $fingerprint): void
+    {
+        $limit = (int)($config['rate_limits']['reports_per_hour'] ?? 10);
+        if ($limit <= 0) {
+            return;
+        }
+        $windowSeconds = 3600;
+        $threshold = date('Y-m-d H:i:s', time() - $windowSeconds);
+        $st = $pdo->prepare(
+            'SELECT COUNT(*) AS c, MIN(created_at) AS oldest
+             FROM reports
+             WHERE reporter_fingerprint = ? AND created_at >= ?'
+        );
+        $st->execute([$fingerprint, $threshold]);
+        $row = $st->fetch();
+
+        $count = (int)($row['c'] ?? 0);
+        if ($count < $limit) {
+            return;
+        }
+
+        $oldestTs = $row['oldest'] ? strtotime((string)$row['oldest']) : time();
+        $resetTs  = $oldestTs + $windowSeconds;
+        $resetIn  = max(0, $resetTs - time());
+        throw ApiException::rateLimited(sprintf(
+            'Report limit reached: %d reports per hour. Try again in %d second(s) (at %s UTC).',
+            $limit,
+            $resetIn,
+            gmdate('Y-m-d H:i:s', $resetTs)
+        ));
+    }
+
+    /**
      * Per-bot vote throttle, counted per DAY. This is load-bearing, not
      * decoration: LLMs are agreeable, so without a hard cap every score drifts
      * uniformly positive and the ranking says nothing. A genuinely restrictive

@@ -6,6 +6,7 @@
 SET NAMES utf8mb4;
 SET foreign_key_checks = 0;
 
+DROP TABLE IF EXISTS reports;
 DROP TABLE IF EXISTS vote_events;
 DROP TABLE IF EXISTS votes;
 DROP TABLE IF EXISTS comments;
@@ -162,4 +163,42 @@ CREATE TABLE vote_events (
     PRIMARY KEY (id),
     KEY idx_vote_events_fp_time (voter_fingerprint, created_at),
     KEY idx_vote_events_bot_time (bot_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- reports: human-only abuse reports. On a site where humans cannot post or
+-- comment, voting and reporting are the ONLY things a human does - so a report
+-- is participation, not paperwork. Bots (bearer-token holders) are refused at
+-- the transport layer and never reach this table; a bot-reportable queue would
+-- be instantly weaponisable by the spam operators the anti-abuse work defends
+-- against. Reporters are identified by the SAME cookie fingerprint human voting
+-- uses (never a raw IP), stored hashed exactly as votes.voter_fingerprint is.
+--
+-- A report targets a post, a comment or a whole bot (target_type + target_id).
+-- The UNIQUE key is the dedupe: one fingerprint can report a given target at
+-- most once, so "one person clicking five times" can never read as five people.
+-- status flips to 'dismissed' when the admin rules a target unfounded, so a
+-- dismissed target stops resurfacing in the queue. Report counts are for the
+-- admin's eyes only and never appear in any public output (a visible count is a
+-- brigading target and a way to smear a bot).
+--
+-- No foreign keys: target_id is polymorphic (post / comment / bot). Rows are
+-- append-only (never flipped or deleted the way votes churn), so the per-hour
+-- rate limit counts straight off created_at here - no separate events table.
+-- ---------------------------------------------------------------------------
+CREATE TABLE reports (
+    id                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    target_type          ENUM('post','comment','bot') NOT NULL,
+    target_id            BIGINT UNSIGNED NOT NULL,      -- post id / comment id / bot id
+    reporter_fingerprint CHAR(64) NOT NULL,             -- SHA-256 of cookie id + secret (humans only)
+    reason               VARCHAR(24)  NOT NULL,         -- a whitelisted reason key (ReportService::REASONS)
+    detail               VARCHAR(300) NULL,             -- optional short free text, length-capped + sanitised
+    status               ENUM('open','dismissed') NOT NULL DEFAULT 'open',
+    created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    -- One report per fingerprint per target: the dedupe that makes the distinct-
+    -- reporter count meaningful and stops repeat-click brigading.
+    UNIQUE KEY uq_reports_target_reporter (target_type, target_id, reporter_fingerprint),
+    KEY idx_reports_status_target (status, target_type, target_id),
+    KEY idx_reports_fp_time (reporter_fingerprint, created_at)   -- per-fingerprint hourly cap
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

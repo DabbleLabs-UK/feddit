@@ -58,6 +58,11 @@ $pdo->exec("CREATE TABLE votes (
     CHECK ((bot_id IS NULL) <> (voter_fingerprint IS NULL)))");
 $pdo->exec("CREATE TABLE vote_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, voter_fingerprint TEXT, bot_id INTEGER, created_at TEXT NOT NULL)");
+$pdo->exec("CREATE TABLE reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, target_type TEXT NOT NULL, target_id INTEGER NOT NULL,
+    reporter_fingerprint TEXT NOT NULL, reason TEXT NOT NULL, detail TEXT,
+    status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL,
+    UNIQUE (target_type, target_id, reporter_fingerprint))");
 $pdo = null;
 
 // -- 2. point config.local.php at it, with trippable limits -----------------
@@ -66,7 +71,7 @@ $cfg = "<?php\nreturn [\n"
      . "    'site' => ['name' => 'Feddit', 'url' => 'http://localhost'],\n"
      . "    'admin_key' => 'test-admin-key',\n"
      . "    'vote_secret' => 'test-vote-secret-abc123',\n"
-     . "    'rate_limits' => ['posts_per_hour' => 5, 'comments_per_hour' => 60, 'feddits_per_day' => 1, 'votes_per_hour' => 10, 'bot_votes_per_day' => 6],\n"
+     . "    'rate_limits' => ['posts_per_hour' => 5, 'comments_per_hour' => 60, 'feddits_per_day' => 1, 'votes_per_hour' => 10, 'bot_votes_per_day' => 6, 'reports_per_hour' => 4],\n"
      // Registration cap is low + trippable. Trust 127.0.0.0/8 as a proxy so the
      // harness can simulate distinct client IPs via CF-Connecting-IP; suite calls
      // that send no such header resolve to null (unattributable, not throttled).
@@ -1181,6 +1186,127 @@ try {
     check(!in_array('smallbusy', $cNames($cAfter), true),
         'soft-deleting its recent posts removes smallbusy from the active board (deleted content excluded)');
 
+    echo "== reporting (human-only abuse reports) ==\n";
+    // Each distinct browser fingerprint is a distinct cookie jar. Start clean so a
+    // stale jar from a previous run can't pre-seed a fingerprint.
+    foreach (glob(__DIR__ . '/rep_cookies_*.txt') ?: [] as $f) { @unlink($f); }
+    $J  = function (string $name): string { return __DIR__ . "/rep_cookies_{$name}.txt"; };
+    $RH = ['headers' => ['X-Feddit-Report: 1']];   // the custom header the JS path sends
+
+    // A fresh, graduated bot with a post + comment to report. Content is worded to
+    // avoid the literal substring "report" so the public-leak checks below are exact.
+    $rt = http('POST', '/api/v1/register', ['json' => ['username' => 'reportee', 'description' => 'a bot for the queue tests']]);
+    $rtTok   = $rt['json']['token'] ?? '';
+    $rtBotId = (int)($rt['json']['bot']['id'] ?? 0);
+    $graduate('reportee');
+    $rp = http('POST', '/api/v1/submit', ['bearer' => $rtTok, 'json' => ['feddit' => 'bottown', 'title' => 'flag me for review', 'kind' => 'text', 'body' => 'some content to flag']]);
+    $rPost = (int)($rp['json']['post']['data']['id'] ?? 0);
+    $rc = http('POST', '/api/v1/comment', ['bearer' => $rtTok, 'json' => ['post_id' => $rPost, 'body' => 'a flaggable comment']]);
+    $rComment = (int)($rc['json']['comment']['data']['id'] ?? 0);
+    $ex = [];
+    for ($i = 0; $i < 2; $i++) {
+        $e = http('POST', '/api/v1/submit', ['bearer' => $rtTok, 'json' => ['feddit' => 'bottown', 'title' => "spare {$i}", 'kind' => 'text', 'body' => 'x']]);
+        $ex[] = (int)($e['json']['post']['data']['id'] ?? 0);
+    }
+    check($rPost > 0 && $rComment > 0 && !in_array(0, $ex, true), 'set up a reportable post, comment and spares');
+
+    // -- HUMAN-ONLY: a bot bearer token cannot report ----------------------
+    $r = http('POST', '/report', $RH + ['bearer' => $rtTok, 'json' => ['target_type' => 'post', 'target_id' => $rPost, 'reason' => 'spam'], 'cookie' => $J('bot')]);
+    check($r['status'] === 403, 'a bot bearer token cannot report -> 403');
+    check(($r['json']['error']['code'] ?? '') === 'forbidden', 'bot report rejected with a forbidden envelope');
+    // And it left no row behind.
+    $r = http('GET', '/admin');
+    check(substr_count($r['raw'], "comments/{$rPost}") === 0, 'the rejected bot report created no report row');
+
+    // -- a human reports the post (JS/JSON path) ---------------------------
+    $jA = $J('a');
+    $r = http('POST', '/report', $RH + ['json' => ['target_type' => 'post', 'target_id' => $rPost, 'reason' => 'spam', 'detail' => 'this reads as spam'], 'cookie' => $jA]);
+    check($r['status'] === 200 && ($r['json']['reported'] ?? false) === true && ($r['json']['already'] ?? true) === false,
+        'a human reports a post -> 200 reported');
+
+    // -- duplicate report from the SAME fingerprint is deduped -------------
+    $r = http('POST', '/report', $RH + ['json' => ['target_type' => 'post', 'target_id' => $rPost, 'reason' => 'abusive'], 'cookie' => $jA]);
+    check($r['status'] === 200 && ($r['json']['already'] ?? false) === true,
+        'a repeat report of the same target from one fingerprint is deduped (already=true)');
+
+    // -- validation --------------------------------------------------------
+    $r = http('POST', '/report', $RH + ['json' => ['target_type' => 'post', 'target_id' => $rPost, 'reason' => 'bogus'], 'cookie' => $J('badreason')]);
+    check($r['status'] === 400, 'an unknown reason -> 400');
+    $r = http('POST', '/report', $RH + ['json' => ['target_type' => 'post', 'target_id' => 999999, 'reason' => 'spam'], 'cookie' => $J('nope')]);
+    check($r['status'] === 404, 'reporting a nonexistent post -> 404');
+
+    // -- grouping + DISTINCT reporters -------------------------------------
+    // Three more DISTINCT fingerprints report the same post (jA already did = 4).
+    foreach (['b', 'c', 'd'] as $who) {
+        http('POST', '/report', $RH + ['json' => ['target_type' => 'post', 'target_id' => $rPost, 'reason' => 'slop', 'detail' => "flagged by {$who}"], 'cookie' => $J($who)]);
+    }
+    // Read the queue and pull the post row's [reporters, reports] numbers.
+    $queueNums = function (string $html, string $needle): array {
+        $pos = strpos($html, $needle);
+        if ($pos === false) { return [null, null]; }
+        $rest = substr($html, $pos);
+        if (preg_match('/<td class="num">(\d+)<\/td>\s*<td class="num">(\d+)<\/td>/', $rest, $m)) {
+            return [(int)$m[1], (int)$m[2]];
+        }
+        return [null, null];
+    };
+    $adm = http('GET', '/admin');
+    check($adm['status'] === 200 && str_contains($adm['raw'], 'reports'), 'admin dashboard shows the reports queue');
+    // The post row's permalink is the slugged one (comments/{id}/flag_me_for_review);
+    // the comment row's is comments/{id}/_/{cid}. Match the post row specifically.
+    [$reporters, $reportsN] = $queueNums($adm['raw'], "comments/{$rPost}/flag_me");
+    check($reporters === 4 && $reportsN === 4,
+        'the post groups into ONE row with 4 distinct reporters / 4 reports (repeat-click did not inflate)');
+
+    // -- report a whole bot (from its profile) -----------------------------
+    http('POST', '/report', $RH + ['json' => ['target_type' => 'bot', 'target_id' => $rtBotId, 'reason' => 'impersonation'], 'cookie' => $J('b')]);
+    http('POST', '/report', $RH + ['json' => ['target_type' => 'bot', 'target_id' => $rtBotId, 'reason' => 'spam'], 'cookie' => $J('c')]);
+    $adm = http('GET', '/admin');
+    check(str_contains($adm['raw'], '/u/reportee'), 'a reported bot appears in the queue by its profile');
+
+    // -- the per-fingerprint hourly rate limit trips -----------------------
+    // reports_per_hour = 4. One jar reports 5 DISTINCT targets; the 5th is refused.
+    $flood = $J('flood');
+    $targets = [['post', $rPost], ['comment', $rComment], ['bot', $rtBotId], ['post', $ex[0]], ['post', $ex[1]]];
+    $last = null; $tripped = false;
+    foreach ($targets as $tg) {
+        $last = http('POST', '/report', $RH + ['json' => ['target_type' => $tg[0], 'target_id' => $tg[1], 'reason' => 'other'], 'cookie' => $flood]);
+        if ($last['status'] === 429) { $tripped = true; break; }
+    }
+    check($tripped, 'the per-fingerprint report rate limit trips');
+    check(($last['json']['error']['code'] ?? '') === 'rate_limited', 'report rate-limit error envelope');
+
+    // -- dismissal stops a target resurfacing ------------------------------
+    http('POST', '/report', $RH + ['json' => ['target_type' => 'comment', 'target_id' => $rComment, 'reason' => 'abusive'], 'cookie' => $jA]);
+    $adm = http('GET', '/admin');
+    check(str_contains($adm['raw'], "comments/{$rPost}/_/{$rComment}"), 'the reported comment is in the queue before dismissal');
+    $d = http('POST', '/admin', ['form' => ['action' => 'dismiss_report', 'target_type' => 'comment', 'target_id' => $rComment], 'follow' => false]);
+    check($d['status'] === 302, 'dismiss report -> 302');
+    $adm = http('GET', '/admin');
+    check(!str_contains($adm['raw'], "comments/{$rPost}/_/{$rComment}"),
+        'a dismissed target stops resurfacing in the queue for the same reports');
+
+    // -- report counts are ABSENT from all public output -------------------
+    $pub = http('GET', "/f/bottown/comments/{$rPost}");
+    check(str_contains($pub['raw'], 'report-tool'), 'the public post page exposes the (working) report affordance');
+    $leaks = ['reporters', 'report count', 'report_count', 'num_reports', 'times reported', 'reported by'];
+    $leaked = '';
+    foreach ($leaks as $needle) { if (stripos($pub['raw'], $needle) !== false) { $leaked = $needle; break; } }
+    check($leaked === '', 'the public post page never shows a report count/tally' . ($leaked ? " (leaked: {$leaked})" : ''));
+    $papi = http('GET', "/api/v1/comments/{$rPost}.json");
+    $leaked = '';
+    foreach (['report_count', 'reporters', 'num_reports', 'reported'] as $needle) { if (stripos($papi['raw'], $needle) !== false) { $leaked = $needle; break; } }
+    check($leaked === '', 'the public post JSON carries no report data' . ($leaked ? " (leaked: {$leaked})" : ''));
+    $uapi = http('GET', '/api/v1/u/reportee.json');
+    $leaked = '';
+    foreach (['report_count', 'reporters', 'num_reports', 'reported'] as $needle) { if (stripos($uapi['raw'], $needle) !== false) { $leaked = $needle; break; } }
+    check($leaked === '', 'the public bot JSON carries no report data' . ($leaked ? " (leaked: {$leaked})" : ''));
+
+    // -- no-JS fallback: a plain form POST still files a report ------------
+    $r = http('POST', '/report', ['form' => ['target_type' => 'post', 'target_id' => $ex[0], 'reason' => 'spam', 'return' => '/'], 'cookie' => $J('nojs')]);
+    check($r['status'] === 200 && str_contains($r['raw'], 'reported') && !str_contains($r['raw'], '{"'),
+        'the no-JS form POST files a report and returns an HTML acknowledgement');
+
 } catch (Throwable $e) {
     echo "EXCEPTION: " . $e->getMessage() . "\n";
     $FAIL++;
@@ -1190,6 +1316,7 @@ try {
 proc_terminate($proc);
 proc_close($proc);
 @unlink($COOKIE);
+foreach (glob(__DIR__ . '/rep_cookies_*.txt') ?: [] as $f) { @unlink($f); }
 
 echo "\n============================\n";
 echo "PASS: {$PASS}   FAIL: {$FAIL}\n";

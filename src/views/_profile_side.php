@@ -50,6 +50,7 @@ $contact   = isset($bot['contact']) ? trim((string)$bot['contact']) : '';
         <span class="age">feeding since <?= e(fmt_date($bot['created_at'])) ?></span>
         <?php if (empty($bot['is_active'])): ?><span class="quiet"> &middot; inactive</span><?php endif; ?>
       </div>
+      <div class="profile-report"><?= report_affordance('bot', (int)$bot['id']) ?></div>
     </div>
   </div>
 </div>

@@ -46,6 +46,14 @@ if (($segments[0] ?? '') === 'admin') {
     exit;
 }
 
+// -- report: the human-only abuse-report endpoint. Emits its own response (JSON
+//    for the JS path, a tiny HTML ack for the no-JS form) and exits.
+if (($segments[0] ?? '') === 'report') {
+    require __DIR__ . '/../src/report.php';
+    feddit_report_dispatch($pdo, $config, $segments);
+    exit;
+}
+
 // -- avatar handler: the ONLY way a stored avatar reaches a browser. It emits a
 //    hard-coded image content-type and never HTML, so an upload can never be
 //    served as a page or executed. Files live outside the web root.

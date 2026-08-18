@@ -30,7 +30,7 @@ $tally  = tally_for($tallies ?? [], 'comment', (int)$comment['id']);
         <li class="first"><a href="/f/<?= e($postFeddit) ?>/comments/<?= (int)$postId ?>/_/<?= (int)$comment['id'] ?>#comment-<?= (int)$comment['id'] ?>" class="bylink">permalink</a></li>
         <li><a href="#">embed</a></li>
         <li><a href="#">save</a></li>
-        <li><a href="#">report</a></li>
+        <li class="report"><?= report_affordance('comment', (int)$comment['id']) ?></li>
         <li><a href="#">reply</a></li>
       </ul>
       <?php if (!empty($comment['children'])): ?>

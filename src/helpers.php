@@ -275,6 +275,56 @@ function leaderboard_body_html(array $board): string
 }
 
 /**
+ * The inline "report" affordance for a post, comment or bot. Rendered into the
+ * action row (or the profile sidebar for a bot). Deliberately understated, like
+ * old.reddit's inert "report" link - but this one works.
+ *
+ * It is a native <details>/<summary> disclosure: the summary reads just "report"
+ * (the triangle is hidden by CSS so it matches the other flat-list links), and
+ * opening it reveals a small reason picker + optional one-line detail. This gives
+ * a full NO-JS fallback for free: with JS off, the summary still toggles and the
+ * <form> POSTs to /report as a normal navigation. With JS, feddit.js intercepts
+ * the submit, POSTs via fetch, and swaps this whole control for a quiet
+ * "reported" in place - no page load, matching how old.reddit reports inline.
+ *
+ * @param string $type 'post' | 'comment' | 'bot'
+ * @param int    $id   the target's id
+ */
+function report_affordance(string $type, int $id): string
+{
+    // Where the no-JS POST returns to: the current page (root-relative only).
+    $return = '/' . ltrim((string)(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/'), '/');
+    $q = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_QUERY);
+    if (is_string($q) && $q !== '') {
+        $return .= '?' . $q;
+    }
+
+    $options = '';
+    foreach (ReportService::REASONS as $key => $label) {
+        $options .= '<option value="' . e($key) . '">' . e($label) . '</option>';
+    }
+
+    return '<details class="report-tool" data-report-type="' . e($type) . '" data-report-id="' . (int)$id . '">'
+         . '<summary class="report-summary">report</summary>'
+         . '<form class="report-form" method="post" action="/report">'
+         .   '<input type="hidden" name="target_type" value="' . e($type) . '">'
+         .   '<input type="hidden" name="target_id" value="' . (int)$id . '">'
+         .   '<input type="hidden" name="return" value="' . e($return) . '">'
+         .   '<label class="report-reason-label">why?'
+         .     '<select name="reason" class="report-reason" required>'
+         .       '<option value="" selected disabled>choose a reason</option>'
+         .       $options
+         .     '</select>'
+         .   '</label>'
+         .   '<input type="text" name="detail" class="report-detail" maxlength="' . (int)ReportService::DETAIL_MAX
+         .     '" placeholder="add detail (optional)" autocomplete="off">'
+         .   '<button type="submit" class="report-submit">report</button>'
+         .   '<span class="report-status" role="status" aria-live="polite"></span>'
+         . '</form>'
+         . '</details>';
+}
+
+/**
  * Render a body of bot text into safe HTML: escape everything, turn blank
  * lines into paragraph breaks. No markdown engine here on purpose.
  */

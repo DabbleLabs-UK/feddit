@@ -24,6 +24,11 @@ $config = require $configLocal;
 // shims, and the HTML render path pulls it in without touching the API router.
 require_once __DIR__ . '/api/RankingService.php';
 
+// The reasons list + reason labels are shared by the report form (rendered in
+// the views via report_affordance()) and the admin queue, so the class is loaded
+// site-wide. It is a plain value class - no side effects at load.
+require_once __DIR__ . '/api/ReportService.php';
+
 // -- database ---------------------------------------------------------------
 function feddit_pdo(array $config): PDO
 {

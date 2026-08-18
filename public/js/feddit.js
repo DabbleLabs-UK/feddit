@@ -313,3 +313,96 @@
     if (next) { toggle.textContent = next; }
   });
 })();
+
+/*
+ * Human reporting. Progressive enhancement over the server-rendered inline
+ * <details> report form (which POSTs to /report and works with JS off): a click
+ * on "report" opens the reason picker in place, and submitting fires the POST via
+ * fetch so the page never navigates. On success the whole control is swapped for
+ * a quiet "reported" - old.reddit's understated acknowledgement - and cannot be
+ * resubmitted. Report counts are never shown; this only ever says "reported".
+ */
+(function () {
+  'use strict';
+
+  // Replace a report control with the quiet, final "reported" acknowledgement.
+  function markReported(tool) {
+    var done = document.createElement('span');
+    done.className = 'reported';
+    done.textContent = 'reported';
+    if (tool.parentNode) { tool.parentNode.replaceChild(done, tool); }
+  }
+
+  function submit(form) {
+    var tool = form.closest ? form.closest('.report-tool') : null;
+    if (!tool) { return; }
+    var type = tool.getAttribute('data-report-type');
+    var id = parseInt(tool.getAttribute('data-report-id'), 10);
+    var reasonEl = form.querySelector('.report-reason');
+    var detailEl = form.querySelector('.report-detail');
+    var statusEl = form.querySelector('.report-status');
+    var button = form.querySelector('.report-submit');
+    var reason = reasonEl ? reasonEl.value : '';
+    if (!type || !id || !reason) {
+      if (statusEl) { statusEl.textContent = 'pick a reason first'; }
+      return;
+    }
+    if (button) { button.disabled = true; }
+    if (statusEl) { statusEl.textContent = ''; }
+
+    fetch('/report', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Feddit-Report': '1'   // custom header: the CSRF-ish guard + the "this is the JS path" signal
+      },
+      body: JSON.stringify({
+        target_type: type,
+        target_id: id,
+        reason: reason,
+        detail: detailEl ? detailEl.value : ''
+      })
+    }).then(function (resp) {
+      return resp.json().catch(function () { return {}; }).then(function (data) {
+        return { ok: resp.ok, status: resp.status, data: data };
+      });
+    }).then(function (r) {
+      if (r.ok && r.data && r.data.reported) {
+        markReported(tool);
+        return;
+      }
+      // Surface the server's message (rate limit, cross-origin, etc.) inline.
+      var msg = (r.data && r.data.error && r.data.error.message)
+        ? r.data.error.message
+        : 'could not report - try again later';
+      if (statusEl) { statusEl.textContent = msg; }
+      if (button) { button.disabled = false; }
+    }).catch(function () {
+      if (statusEl) { statusEl.textContent = 'could not report - try again later'; }
+      if (button) { button.disabled = false; }
+    });
+  }
+
+  function bindReports(root) {
+    var forms = (root || document).querySelectorAll('.report-form');
+    for (var i = 0; i < forms.length; i++) {
+      var f = forms[i];
+      if (f._reportBound) { continue; }
+      f._reportBound = true;
+      f.addEventListener('submit', function (e) {
+        e.preventDefault();
+        submit(e.currentTarget);
+      });
+    }
+  }
+
+  // Expose so progressively-loaded content can wire up its report forms too.
+  window.fedditBindReports = bindReports;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { bindReports(document); });
+  } else {
+    bindReports(document);
+  }
+})();

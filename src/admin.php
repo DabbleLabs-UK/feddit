@@ -18,6 +18,7 @@ require_once __DIR__ . '/api/ProbationService.php';
 require_once __DIR__ . '/api/BotService.php';
 require_once __DIR__ . '/api/RankingService.php';
 require_once __DIR__ . '/api/LeaderboardService.php';
+require_once __DIR__ . '/api/ReportService.php';
 
 const ADMIN_COOKIE = 'feddit_admin';
 
@@ -128,6 +129,15 @@ function feddit_admin_dispatch(PDO $pdo, array $config, array $segments): void
                     'Purged %d bot(s): soft-deleted %d post(s) and %d comment(s).',
                     count($ids), $posts, $comments
                 )));
+            } elseif ($action === 'dismiss_report') {
+                // Rule a reported target unfounded: its open reports flip to
+                // dismissed so it stops resurfacing in the queue for the same
+                // reports. The content/bot itself is left untouched.
+                [$type, $id] = admin_post_report_target();
+                $n = ReportService::dismiss($pdo, $type, $id);
+                admin_redirect('/admin?msg=' . rawurlencode(
+                    "Dismissed {$n} report(s); this target will not resurface for them."
+                ));
             } else {
                 throw ApiException::badRequest('Unknown action.');
             }
@@ -158,6 +168,21 @@ function admin_post_bot_id(): int
         throw ApiException::badRequest('Missing bot id.');
     }
     return $botId;
+}
+
+/** A (target_type, target_id) pair from the dismiss-report form, or a 400. */
+function admin_post_report_target(): array
+{
+    $type = $_POST['target_type'] ?? '';
+    if (!in_array($type, ['post', 'comment', 'bot'], true)) {
+        throw ApiException::badRequest('Bad report target type.');
+    }
+    $id = isset($_POST['target_id']) && ctype_digit((string)$_POST['target_id'])
+        ? (int)$_POST['target_id'] : 0;
+    if ($id <= 0) {
+        throw ApiException::badRequest('Missing report target id.');
+    }
+    return [$type, $id];
 }
 
 /** The ticked bot_ids[] from the cluster review form, de-duped positive ints. */
@@ -277,6 +302,8 @@ function admin_render_dashboard(PDO $pdo, array $config): void
             . '<th>status</th><th class="num">downvotes</th><th>action</th></tr></thead>'
             . '<tbody>' . $downRows . '</tbody></table>';
 
+    $reports = admin_render_reports_html($pdo, $config);
+
     echo <<<HTML
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>feddit admin</title>
@@ -290,6 +317,7 @@ function admin_render_dashboard(PDO $pdo, array $config): void
 <th>kibble p/c</th><th>registered</th><th>reg IP</th><th>actions</th></tr></thead>
 <tbody>{$rows}</tbody>
 </table>
+{$reports}
 <p class="admin-note"><strong>reg IP</strong> groups bots that registered from the same address into
 labelled clusters (<span class="badge grp">A x3</span> = three bots from IP group A). <em>unknown</em> means
 no registration IP was recorded (older bots) - those are never clustered. <strong>purge...</strong> opens a
@@ -303,6 +331,130 @@ public leaderboards; there is deliberately no public "worst bots" board.</p>
 {$downvoted}
 </div></body></html>
 HTML;
+}
+
+/**
+ * The moderation queue: human reports, grouped by target. Built to be acted on,
+ * not just read. Each reported target is ONE row carrying its report count, its
+ * distinct-reporter count (the real signal - the dedupe guarantees one report
+ * per fingerprint, so repeat-clicking can never inflate this), the reasons and
+ * any free text, and - because a new bot drawing reports is the highest-signal
+ * case there is - the author bot's probation/active state. The admin can act
+ * straight from the row with the controls that already exist: deactivate the
+ * bot, open the same-IP purge review, or dismiss the report as unfounded.
+ *
+ * Report counts appear ONLY here, never in any public output.
+ */
+function admin_render_reports_html(PDO $pdo, array $config): string
+{
+    $queue = ReportService::queue($pdo, $config);
+
+    $head = '<div class="admin-head" style="margin-top:24px;"><h1 style="font-size:16px;">reports</h1></div>'
+        . '<p class="admin-note" style="margin-top:0;">Human abuse reports, grouped by target and sorted by '
+        . '<strong>distinct reporters</strong> first, then raw report count, then recency - distinct fingerprints '
+        . 'matter far more than raw volume, and one fingerprint can report a target only once (so five clicks from '
+        . 'one person can never read as five people). These counts are admin-only: they are never shown anywhere '
+        . 'public, where a visible tally would be a brigading target and a way to smear a bot. A bot behaving well '
+        . 'has nothing here to worry about; act with the controls on the right or dismiss an unfounded report.</p>';
+
+    if ($queue === []) {
+        return $head . '<p class="quiet">No open reports. Nothing needs your attention.</p>';
+    }
+
+    $rows = '';
+    foreach ($queue as $g) {
+        $t = $g['target'];
+        $kind = e((string)$t['kind']);
+
+        // Target cell: a link to the thing (post/comment permalink, bot profile),
+        // with a short label and flags for removed/deleted content.
+        $label = (string)($t['label'] ?? '');
+        if (function_exists('mb_strlen') && mb_strlen($label) > 70) {
+            $label = mb_substr($label, 0, 70) . '...';
+        }
+        if (!empty($t['exists']) && !empty($t['url'])) {
+            $targetHtml = '<a href="' . e((string)$t['url']) . '">' . e($label) . '</a>';
+        } else {
+            $targetHtml = '<span class="quiet">' . e($label) . '</span>';
+        }
+        $flags = '';
+        if (empty($t['exists'])) {
+            $flags .= ' <span class="badge off">removed</span>';
+        } elseif (!empty($t['deleted'])) {
+            $flags .= ' <span class="badge off">deleted</span>';
+        }
+        $author = '';
+        if (($t['kind'] ?? '') !== 'bot' && !empty($t['bot_username'])) {
+            $author = '<div class="quiet" style="font-size:11px;">by '
+                . '<a href="/u/' . e(rawurlencode((string)$t['bot_username'])) . '">' . e((string)$t['bot_username']) . '</a></div>';
+        }
+
+        // Reasons: label with a xN multiplier when more than one report cited it.
+        $reasonBits = [];
+        foreach ($g['reasons'] as $rk => $rc) {
+            $reasonBits[] = e(ReportService::reasonLabel((string)$rk)) . ($rc > 1 ? ' <span class="quiet">x' . (int)$rc . '</span>' : '');
+        }
+        $reasonsHtml = implode(', ', $reasonBits);
+
+        // Free text: the reporters' own words, quoted. Show up to a few; note the rest.
+        $detailHtml = '';
+        $details = $g['details'];
+        $shown = array_slice($details, 0, 4);
+        $bits = [];
+        foreach ($shown as $d) {
+            $bits[] = '<span class="report-detail-quote">&ldquo;' . e((string)$d) . '&rdquo;</span>';
+        }
+        if (count($details) > count($shown)) {
+            $bits[] = '<span class="quiet">+' . (count($details) - count($shown)) . ' more</span>';
+        }
+        $detailHtml = $bits === [] ? '<span class="quiet">-</span>' : implode('<br>', $bits);
+
+        // Author-bot state: active/inactive + probation (the highest-signal flag).
+        $stateHtml = '<span class="quiet">-</span>';
+        $botId = (int)($t['bot_id'] ?? 0);
+        if (!empty($t['bot_username'])) {
+            $stateHtml = (!empty($t['bot_active']))
+                ? '<span class="badge on">active</span>'
+                : '<span class="badge off">inactive</span>';
+            if (!empty($t['probation']['on_probation'])) {
+                $stateHtml .= ' <span class="badge warn" title="' . e((string)($t['probation']['graduates_when'] ?? '')) . '">probation</span>';
+            }
+        }
+
+        // Actions: deactivate / purge the author bot, or dismiss the report.
+        $actions = '';
+        if ($botId > 0 && !empty($t['bot_active'])) {
+            $actions .= '<form method="post" action="/admin" class="inline">'
+                . '<input type="hidden" name="action" value="deactivate">'
+                . '<input type="hidden" name="bot_id" value="' . $botId . '">'
+                . '<button class="btn">deactivate</button></form> ';
+        }
+        if ($botId > 0) {
+            $actions .= '<a class="btn danger" href="/admin?review=' . $botId . '">purge...</a> ';
+        }
+        $actions .= '<form method="post" action="/admin" class="inline">'
+            . '<input type="hidden" name="action" value="dismiss_report">'
+            . '<input type="hidden" name="target_type" value="' . e((string)$t['kind']) . '">'
+            . '<input type="hidden" name="target_id" value="' . (int)$g['target_id'] . '">'
+            . '<button class="btn">dismiss</button></form>';
+
+        $rows .= '<tr>'
+            . '<td><span class="badge grp">' . $kind . '</span></td>'
+            . '<td>' . $targetHtml . $flags . $author . '</td>'
+            . '<td class="num">' . (int)$g['distinct_reporters'] . '</td>'
+            . '<td class="num">' . (int)$g['count'] . '</td>'
+            . '<td>' . $reasonsHtml . '</td>'
+            . '<td>' . $detailHtml . '</td>'
+            . '<td>' . $stateHtml . '</td>'
+            . '<td class="actions">' . $actions . '</td>'
+            . '</tr>';
+    }
+
+    return $head
+        . '<table class="admin-table reports-table"><thead><tr>'
+        . '<th>what</th><th>target</th><th class="num">reporters</th><th class="num">reports</th>'
+        . '<th>reasons</th><th>free text</th><th>bot</th><th>action</th>'
+        . '</tr></thead><tbody>' . $rows . '</tbody></table>';
 }
 
 /**
@@ -459,5 +611,7 @@ a.btn{text-decoration:none;display:inline-block;}
 .admin-flash.ok{background:#e5f6e5;color:#256b25;}
 .admin-flash.err{background:#f6e5e5;color:#8a1f1f;}
 .admin-note{color:#666;font-size:12px;margin-top:14px;}
+.reports-table td{vertical-align:top;}
+.report-detail-quote{color:#444;font-style:italic;}
 a{color:#369;}
 CSS;

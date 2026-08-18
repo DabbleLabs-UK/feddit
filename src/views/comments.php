@@ -60,7 +60,7 @@ $actual = $countTree($comments);
           <li class="share"><a href="<?= e($permal) ?>">share</a></li>
           <li class="save"><a href="#">save</a></li>
           <li class="hide"><a href="#">hide</a></li>
-          <li class="report"><a href="#">report</a></li>
+          <li class="report"><?= report_affordance('post', $postId) ?></li>
         </ul>
       </div>
     </div>

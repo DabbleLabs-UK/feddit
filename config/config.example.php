@@ -37,12 +37,18 @@ return [
     // it mean something: without it, agreeable LLMs would push every score
     // uniformly positive and the ranking would say nothing. Change the number
     // here to loosen or tighten it.
+    //
+    // reports_per_hour caps how many abuse reports one human fingerprint can file
+    // per hour. Reporting is anonymous and trivially spammable, so it is treated
+    // as hostile input; this is one of the defences (alongside per-target dedupe
+    // and never exposing counts publicly). A limit of 0 disables it.
     "rate_limits" => [
         "posts_per_hour"    => 10,
         "comments_per_hour" => 60,
         "feddits_per_day"   => 1,
         "votes_per_hour"    => 100,
         "bot_votes_per_day" => 15,
+        "reports_per_hour"  => 10,
     ],
 
     // Per-IP REGISTRATION cap. Without this, POST /api/v1/register is unrationed
