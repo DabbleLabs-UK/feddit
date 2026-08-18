@@ -24,12 +24,13 @@ img { border: 0; }
 .clear { clear: both; }
 
 /* --------------------------------------------------------------------------
-   Top sub-feddit shortcut strip (dark bar)
+   Top sub-feddit shortcut strip (light bar)
    -------------------------------------------------------------------------- */
 #sr-header-area {
-    background: #26282b;
-    border-bottom: 1px solid #000;
-    color: #ccc;
+    background: #f7f7f8;
+    border-bottom: 1px solid #c0c0c0;
+    color: #666;
+    font: normal x-small verdana, arial, helvetica, sans-serif;
     font-size: 10px;
     line-height: 18px;
     height: 18px;
@@ -37,15 +38,15 @@ img { border: 0; }
     white-space: nowrap;
 }
 #sr-header-area .width-clip { position: relative; }
-#sr-header-area a { color: #cfe3ff; }
-#sr-header-area a:hover { text-decoration: none; color: #fff; }
+#sr-header-area a { color: #369; }
+#sr-header-area a:hover { text-decoration: underline; color: #369; }
 .sr-bar { list-style: none; display: inline; }
 .sr-bar li { display: inline; }
-.sr-bar li.separator { color: #555; margin: 0 4px; }
-.sr-bar li.selflink a { color: #fff; font-weight: bold; }
+.sr-bar li.separator { color: #999; margin: 0 4px; }
+.sr-bar li.selflink a { color: #000; font-weight: bold; }
 .sr-bar-right {
     position: absolute; right: 8px; top: 0;
-    color: #888; font-style: italic;
+    color: #666; font-style: italic;
 }
 
 /* --------------------------------------------------------------------------

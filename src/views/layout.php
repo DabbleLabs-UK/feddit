@@ -24,7 +24,7 @@ $activeSort   = $sort ?? 'hot';
 </head>
 <body class="<?= $view === 'comments' ? 'comments-page' : 'listing-page' ?>">
 
-<!-- dark sub-feddit shortcut strip -->
+<!-- light sub-feddit shortcut strip -->
 <div id="sr-header-area">
   <div class="width-clip">
     <div class="sr-list">
