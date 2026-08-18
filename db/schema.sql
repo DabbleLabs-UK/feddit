@@ -112,32 +112,47 @@ CREATE TABLE comments (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
--- votes: one row per (target, fingerprint). Not yet written to, but the
--- read layer may aggregate from here later. Kept for schema completeness.
+-- votes: one row per (target, voter). A voter is EITHER a human (identified by
+-- voter_fingerprint) OR a bot (identified by bot_id, and carrying a written
+-- reason - the reasoned vote is the whole point). The CHECK enforces exactly
+-- one of the two. Two unique keys keep "one vote per voter per target" for both
+-- kinds; NULLs compare as distinct, so bot rows never collide on the human key
+-- and vice-versa. The read layer splits any score four ways from this table.
 -- ---------------------------------------------------------------------------
 CREATE TABLE votes (
     id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     target_type       ENUM('post','comment') NOT NULL,
     target_id         BIGINT UNSIGNED NOT NULL,
-    voter_fingerprint CHAR(64) NOT NULL,      -- SHA-256 of cookie/IP
+    voter_fingerprint CHAR(64) NULL,          -- SHA-256 of cookie/IP (human votes)
+    bot_id            BIGINT UNSIGNED NULL,    -- the voting bot (bot votes)
     direction         TINYINT  NOT NULL,      -- +1 / -1
+    reason            TEXT     NULL,           -- required for bot votes; the content a bot vote creates
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_votes_target_voter (target_type, target_id, voter_fingerprint),
-    KEY idx_votes_target (target_type, target_id)
+    UNIQUE KEY uq_votes_target_bot (target_type, target_id, bot_id),
+    KEY idx_votes_target (target_type, target_id),
+    KEY idx_votes_bot (bot_id),
+    CONSTRAINT fk_votes_bot FOREIGN KEY (bot_id)
+        REFERENCES bots (id) ON DELETE CASCADE,
+    -- Exactly one voter kind is set (XOR): a human fingerprint or a bot id.
+    CONSTRAINT chk_votes_one_voter CHECK ((bot_id IS NULL) <> (voter_fingerprint IS NULL))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
--- vote_events: an append-only log of human vote actions, used ONLY to rate
--- limit a single fingerprint per hour. It is deliberately separate from
--- `votes`: a vote row is upserted (flip) or deleted (remove) in place, so its
--- created_at cannot count actions, and a churn of cast/remove would otherwise
--- evade a limit counted off the live rows. One row per genuine vote call.
+-- vote_events: an append-only log of vote actions, used ONLY for rate limiting
+-- (a human fingerprint per hour, or a bot per day). It is deliberately separate
+-- from `votes`: a vote row is upserted (flip) or deleted (remove) in place, so
+-- its created_at cannot count actions, and a churn of cast/remove would
+-- otherwise evade a limit counted off the live rows. One row per genuine vote
+-- call. Each event is EITHER a human (voter_fingerprint) or a bot (bot_id).
 -- ---------------------------------------------------------------------------
 CREATE TABLE vote_events (
     id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    voter_fingerprint CHAR(64) NOT NULL,
+    voter_fingerprint CHAR(64) NULL,
+    bot_id            BIGINT UNSIGNED NULL,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    KEY idx_vote_events_fp_time (voter_fingerprint, created_at)
+    KEY idx_vote_events_fp_time (voter_fingerprint, created_at),
+    KEY idx_vote_events_bot_time (bot_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

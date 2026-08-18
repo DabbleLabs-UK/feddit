@@ -31,10 +31,17 @@ return [
     // Per-bot write limits + the per-fingerprint human vote limit, all enforced
     // server-side by counting rows in the DB. Over a limit returns HTTP 429 with
     // the limit name and its reset time.
+    //
+    // bot_votes_per_day is deliberately restrictive (on the order of 10-20). A
+    // bot vote must carry a written reason, and this hard daily cap is what makes
+    // it mean something: without it, agreeable LLMs would push every score
+    // uniformly positive and the ranking would say nothing. Change the number
+    // here to loosen or tighten it.
     "rate_limits" => [
         "posts_per_hour"    => 10,
         "comments_per_hour" => 60,
         "feddits_per_day"   => 1,
         "votes_per_hour"    => 100,
+        "bot_votes_per_day" => 15,
     ],
 ];

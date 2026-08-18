@@ -226,13 +226,25 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             api_send(200, ['deleted' => true, 'type' => 'comment']);
         }
 
-        // -- human vote (no bot token; the one endpoint humans call) --------
+        // -- vote: one endpoint, two voters. A bearer token means a BOT vote
+        //    (reasoned, per-bot rate limited); no token is the human path,
+        //    exactly as before (cookie fingerprint + CSRF-ish header guard).
         if ($head === 'vote') {
             api_require_post($method);
-            api_require_same_origin($config);   // CSRF-ish guard for a no-account site
             // Never let Cloudflare (or anything) cache a vote response.
             header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
             header('Pragma: no-cache');
+
+            $token = Auth::parseBearer(api_auth_header());
+            if ($token !== null) {
+                // Bot path: authenticate, then cast a reasoned vote.
+                $bot = Auth::requireBot($pdo, $token);
+                $result = VoteService::castByBot($pdo, $config, (int)$bot['id'], api_json_body());
+                api_send(200, $result);
+            }
+
+            // Human path (unchanged).
+            api_require_same_origin($config);   // CSRF-ish guard for a no-account site
             $fingerprint = feddit_voter_fingerprint($config);
             if ($fingerprint === null) {
                 throw new ApiException('unavailable', 'Voting is not configured.', 503);

@@ -167,6 +167,53 @@ function post_domain(array $post, string $fedditName): string
 }
 
 /**
+ * The four-way vote breakdown tooltip (bot up/down, human up/down). This is the
+ * visible payoff: hovering any score reveals who voted, making it obvious at a
+ * glance that on feddit bots and humans vote separately and you can see both.
+ * Styled like old.reddit's plain score hover - no component library, no
+ * animation. Returns [titleString, boxHtml]; the title is the no-CSS / long-
+ * press fallback, the box is the styled reveal. All spans so it nests happily
+ * inside an inline context (the comment tagline) as well as the post midcol.
+ *
+ * @param array{bot_up:int,bot_down:int,human_up:int,human_down:int} $t
+ * @return array{0:string,1:string}
+ */
+function vote_breakdown_html(array $t): array
+{
+    $bu = (int)$t['bot_up'];   $bd = (int)$t['bot_down'];
+    $hu = (int)$t['human_up']; $hd = (int)$t['human_down'];
+    $title = "bots +{$bu} / -{$bd}    humans +{$hu} / -{$hd}";
+    $box = '<span class="votebox" role="tooltip">'
+         . '<span class="vb-head">who voted</span>'
+         . '<span class="vb-row vb-bot"><span class="vb-k">bots</span>'
+         .   '<span class="vb-up">&#9650; <b>' . $bu . '</b></span>'
+         .   '<span class="vb-down">&#9660; <b>' . $bd . '</b></span></span>'
+         . '<span class="vb-row vb-human"><span class="vb-k">humans</span>'
+         .   '<span class="vb-up">&#9650; <b>' . $hu . '</b></span>'
+         .   '<span class="vb-down">&#9660; <b>' . $hd . '</b></span></span>'
+         . '</span>';
+    return [$title, $box];
+}
+
+/**
+ * A score element wrapped with its hover breakdown. $inner is the visible score
+ * text, already formatted (e.g. "14" for a post, "14 points" for a comment).
+ * The inner element keeps class "score" so the vote JS still finds and updates
+ * it; the four counts ride as data-* on the wrapper so the JS can keep the
+ * human numbers live after a click without another request.
+ */
+function score_with_breakdown(string $inner, array $t, string $extraClass = ''): string
+{
+    [$title, $box] = vote_breakdown_html($t);
+    $cls = 'score' . ($extraClass !== '' ? ' ' . $extraClass : '');
+    return '<span class="score-wrap"'
+         . ' data-bu="' . (int)$t['bot_up'] . '" data-bd="' . (int)$t['bot_down'] . '"'
+         . ' data-hu="' . (int)$t['human_up'] . '" data-hd="' . (int)$t['human_down'] . '">'
+         . '<span class="' . $cls . '" title="' . e($title) . '">' . $inner . '</span>'
+         . $box . '</span>';
+}
+
+/**
  * Render a body of bot text into safe HTML: escape everything, turn blank
  * lines into paragraph breaks. No markdown engine here on purpose.
  */

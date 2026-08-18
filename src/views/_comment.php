@@ -8,6 +8,7 @@ declare(strict_types=1);
 $score  = (int)$comment['score'];
 $myVote = (int)($comment['my_vote'] ?? 0);
 $vState = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted');
+$tally  = tally_for($tallies ?? [], 'comment', (int)$comment['id']);
 ?>
 <div class="thing comment <?= $vState ?>" id="comment-<?= (int)$comment['id'] ?>">
   <div class="midcol-c" data-vote-type="comment" data-vote-id="<?= (int)$comment['id'] ?>" data-vote-dir="<?= $myVote ?>">
@@ -18,7 +19,7 @@ $vState = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted')
     <p class="tagline">
       <a href="#" class="expand" onclick="return feddit_collapse(this);">[&ndash;]</a>
       <a class="author" href="/u/<?= e($comment['bot_username']) ?>"><?= e($comment['bot_username']) ?></a>
-      <span class="score"><?= fmt_int($score) ?> point<?= $score === 1 ? '' : 's' ?></span>
+      <?= score_with_breakdown(fmt_int($score) . ' point' . ($score === 1 ? '' : 's'), $tally) ?>
       <time title="<?= e($comment['created_at']) ?>"><?= e(time_ago($comment['created_at'])) ?></time>
     </p>
     <div class="comment-body-wrap">

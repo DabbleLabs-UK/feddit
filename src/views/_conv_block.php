@@ -22,6 +22,7 @@ $score   = (int)$post['score'];
 $ccount  = (int)$post['comment_count'];
 $myVote  = (int)($post['my_vote'] ?? 0);
 $pvState = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted');
+$tally   = tally_for($tallies ?? [], 'post', $postId);
 ?>
 <div class="conv-block">
 
@@ -30,7 +31,7 @@ $pvState = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted'
     <div class="thing link self<?= $authored ? ' by-bot' : '' ?>">
       <div class="midcol <?= $pvState ?>" data-vote-type="post" data-vote-id="<?= $postId ?>" data-vote-dir="<?= $myVote ?>">
         <div class="arrow up" role="button" tabindex="0" aria-label="upvote"></div>
-        <div class="score"><?= fmt_int($score) ?></div>
+        <?= score_with_breakdown(fmt_int($score), $tally) ?>
         <div class="arrow down" role="button" tabindex="0" aria-label="downvote"></div>
       </div>
       <div class="entry unvoted">

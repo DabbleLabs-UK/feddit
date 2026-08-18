@@ -767,3 +767,98 @@ ul.flat-list.buttons li.first a { color: #888; }
     color: #aaa;
     font-size: 10px;
 }
+
+/* --------------------------------------------------------------------------
+   Score hover breakdown (bot vs human up/down) + the reasoned bot votes panel.
+   A plain old.reddit-style tooltip: no component library, no animation. The
+   four numbers are rendered with the page, so a hover costs no request. On
+   touch (no hover) a tap toggles it via .show, and the score's title attribute
+   is the ultimate no-JS fallback.
+   -------------------------------------------------------------------------- */
+.score-wrap { position: relative; display: inline-block; }
+.score-wrap .score { cursor: help; }
+
+.votebox {
+    display: none;
+    position: absolute;
+    /* Anchored to the score's left edge, opening rightward-and-up. Scores sit in
+       the far-left column, so a centered tooltip would clip off the viewport;
+       this keeps it fully on-screen everywhere. */
+    left: -2px;
+    bottom: 100%;
+    margin-bottom: 7px;
+    z-index: 40;
+    background: #fff;
+    border: 1px solid #b9c2c9;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
+    border-radius: 2px;
+    padding: 5px 9px 6px;
+    white-space: nowrap;
+    text-align: left;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: normal;
+    color: #333;
+    cursor: default;
+}
+.score-wrap:hover .votebox,
+.score-wrap.show .votebox { display: block; }
+
+/* speech-bubble nub pointing down at the score */
+.votebox::before,
+.votebox::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 14px;
+    border: 6px solid transparent;
+}
+.votebox::before { margin-left: -6px; border-top-color: #b9c2c9; }
+.votebox::after  { margin-left: -5px; border: 5px solid transparent; border-top-color: #fff; }
+
+.vb-head {
+    display: block;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #999;
+    margin-bottom: 3px;
+}
+.vb-row { display: block; }
+.vb-k   { display: inline-block; width: 50px; color: #666; }
+.vb-up, .vb-down { display: inline-block; width: 40px; }
+.vb-up   { color: #ff4500; }
+.vb-down { color: #9494ff; }
+.vb-up b, .vb-down b { color: #222; font-weight: bold; }
+
+/* Reasoned bot votes, shown under a post on its comments page. */
+.bot-votes {
+    clear: both;
+    margin: 10px 0 6px;
+    padding: 8px 12px 9px;
+    background: #f7faf7;
+    border: 1px solid #e0eae0;
+    border-radius: 2px;
+}
+.bot-votes-head { margin-bottom: 6px; }
+.bot-votes-head .bv-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #4f7f4f;
+    text-transform: lowercase;
+}
+.bot-votes-head .bv-sub { font-size: 11px; color: #888; margin-left: 6px; }
+.bot-votes-list { list-style: none; margin: 0; padding: 0; }
+.bv-item {
+    padding: 3px 0;
+    font-size: 12px;
+    line-height: 16px;
+    border-top: 1px solid #eef3ee;
+}
+.bv-item:first-child { border-top: 0; }
+.bv-dir { display: inline-block; width: 12px; font-size: 10px; }
+.bv-item.bv-up   .bv-dir { color: #ff4500; }
+.bv-item.bv-down .bv-dir { color: #9494ff; }
+.bv-voter { font-weight: bold; color: #369; }
+.bv-on { color: #999; font-size: 11px; margin: 0 2px; }
+.bv-reason { color: #333; }

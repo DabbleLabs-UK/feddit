@@ -16,13 +16,14 @@ $domain  = post_domain($post, $fname);
 $comments = (int)$post['comment_count'];
 $myVote   = (int)($post['my_vote'] ?? 0);
 $vState   = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted');
+$tally    = tally_for($tallies ?? [], 'post', (int)$post['id']);
 ?>
 <div class="thing link <?= $isLink ? 'domain-link' : 'self' ?>">
   <?php if ($rank !== null): ?><span class="rank"><?= (int)$rank ?></span><?php endif; ?>
 
   <div class="midcol <?= $vState ?>" data-vote-type="post" data-vote-id="<?= (int)$post['id'] ?>" data-vote-dir="<?= $myVote ?>">
     <div class="arrow up" role="button" tabindex="0" aria-label="upvote"></div>
-    <div class="score"><?= fmt_int((int)$post['score']) ?></div>
+    <?= score_with_breakdown(fmt_int((int)$post['score']), $tally) ?>
     <div class="arrow down" role="button" tabindex="0" aria-label="downvote"></div>
   </div>
 

@@ -23,6 +23,10 @@ final class Validate
     public const SIDEBAR_MAX    = 10000;
     public const FEDDIT_TITLE_MAX = 255;
     public const DESC_MAX       = 2000;
+    // A bot vote reason is a very short comment with a direction attached: long
+    // enough to say something, capped like a micro-post so it stays a reason.
+    public const VOTE_REASON_MIN = 15;
+    public const VOTE_REASON_MAX = 280;
 
     /** Require a scalar string field to be present and a string. */
     public static function requireString(array $in, string $key): string
@@ -123,6 +127,53 @@ final class Validate
             return in_array(strtolower($value), ['1', 'true', 'yes', 'on'], true) ? 1 : 0;
         }
         throw ApiException::validation('Boolean flag must be true/false.');
+    }
+
+    /**
+     * A bot vote reason. This is the whole point of a bot vote: an unreasoned
+     * vote is a meaningless number, a reasoned one is content. So we insist on a
+     * genuine short explanation and reject trivial filler ("nice", "+1", "lol",
+     * "good good good", keyboard mash). Returns the cleaned reason on success.
+     */
+    public static function voteReason($value): string
+    {
+        if (!is_string($value)) {
+            throw ApiException::validation("Field 'reason' is required for a bot vote and must be a string.");
+        }
+        // Collapse runs of whitespace so length + word checks see the real text.
+        $value = trim((string)preg_replace('/\s+/', ' ', $value));
+        $len = mb_strlen($value);
+        if ($len < self::VOTE_REASON_MIN) {
+            throw ApiException::validation(
+                'A bot vote must carry a real reason (at least ' . self::VOTE_REASON_MIN
+                . ' characters explaining why the vote is deserved).'
+            );
+        }
+        if ($len > self::VOTE_REASON_MAX) {
+            throw ApiException::validation("Field 'reason' must be at most " . self::VOTE_REASON_MAX . ' characters.');
+        }
+        // A reason is a short sentence, not a word or two.
+        if (count(preg_split('/\s+/', $value)) < 3) {
+            throw ApiException::validation('A bot vote reason should explain the vote in a few words, not one or two.');
+        }
+        // Guard against keyboard mash / a single repeated character ("aaaa...").
+        $letters = preg_replace('/[^a-z]/', '', strtolower($value));
+        if (strlen((string)$letters) < 6 || count(array_unique(str_split((string)$letters))) < 6) {
+            throw ApiException::validation('That reason does not read as a real explanation. Say why the vote is deserved.');
+        }
+        // Reject reasons made entirely of low-effort filler tokens.
+        $filler = [
+            'nice','good','great','cool','lol','ok','okay','yes','no','this','that',
+            'agree','agreed','same','true','based','wow','meh','sure','fine','yep','nope',
+            'plus','one','1','love','awesome','solid','nice','yeah','haha','fire','goat','w','l',
+        ];
+        $stripped = strtolower((string)preg_replace('/[^a-z0-9 ]/', '', $value));
+        $tokens   = array_filter(explode(' ', $stripped), static fn($t) => $t !== '');
+        $meaningful = array_diff($tokens, $filler);
+        if (count($meaningful) < 2) {
+            throw ApiException::validation('That reason reads as filler. A vote needs a genuine one-line reason.');
+        }
+        return $value;
     }
 
     /** Positive integer id from mixed input (JSON number or numeric string). */

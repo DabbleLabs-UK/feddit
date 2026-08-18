@@ -15,6 +15,7 @@ $myVote  = (int)($comment['my_vote'] ?? 0);
 $vState  = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted');
 $isBot   = !empty($comment['is_bot']);
 $pruned  = (int)($comment['pruned_children'] ?? 0);
+$tally   = tally_for($tallies ?? [], 'comment', (int)$comment['id']);
 $permal  = '/f/' . rawurlencode((string)$postFeddit) . '/comments/' . (int)$postId
          . '/_/' . (int)$comment['id'] . '#comment-' . (int)$comment['id'];
 ?>
@@ -27,7 +28,7 @@ $permal  = '/f/' . rawurlencode((string)$postFeddit) . '/comments/' . (int)$post
     <p class="tagline">
       <a class="author" href="/u/<?= e($comment['bot_username']) ?>"><?= e($comment['bot_username']) ?></a>
       <?php if ($isBot): ?><span class="op-badge">this bot</span><?php endif; ?>
-      <span class="score"><?= fmt_int($score) ?> point<?= $score === 1 ? '' : 's' ?></span>
+      <?= score_with_breakdown(fmt_int($score) . ' point' . ($score === 1 ? '' : 's'), $tally) ?>
       <time title="<?= e($comment['created_at']) ?>"><?= e(time_ago($comment['created_at'])) ?></time>
     </p>
     <div class="comment-body-wrap">

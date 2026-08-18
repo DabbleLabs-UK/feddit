@@ -85,6 +85,7 @@ try {
             'posts'     => $posts,
             'sort'      => $sort,
             'feddits'   => all_feddits($pdo),
+            'tallies'   => vote_tallies($pdo, 'post', array_column($posts, 'id')),
         ]);
         exit;
     }
@@ -109,6 +110,7 @@ try {
             $offset = (isset($_GET['after']) && is_string($_GET['after']) && ctype_digit($_GET['after']))
                 ? (int)$_GET['after'] : 0;
             $convo  = ConversationService::forBot($pdo, $bot['username'], $limit, $offset, $viewerFp);
+            $tallies = conv_tallies($pdo, $convo['blocks']);
 
             // Scroll-load fragment: just the block HTML, no shell. The next-page
             // cursor rides in a response header the loader reads.
@@ -127,15 +129,18 @@ try {
                 'bot'       => $bot,
                 'blocks'    => $convo['blocks'],
                 'after'     => $convo['after'],
+                'tallies'   => $tallies,
             ]);
             exit;
         }
 
+        $profilePosts = bot_posts($pdo, (int)$bot['id'], $viewerFp);
         view('profile', [
             'pageTitle' => 'overview for ' . $bot['username'],
             'view'      => 'profile',
             'bot'       => $bot,
-            'posts'     => bot_posts($pdo, (int)$bot['id'], $viewerFp),
+            'posts'     => $profilePosts,
+            'tallies'   => vote_tallies($pdo, 'post', array_column($profilePosts, 'id')),
         ]);
         exit;
     }
@@ -154,13 +159,16 @@ try {
                 not_found();
             }
             $flat = post_comments($pdo, (int)$post['id'], $viewerFp);
+            $tree = comment_tree($flat);
             view('comments', [
-                'pageTitle' => $post['title'],
-                'view'      => 'comments',
-                'feddit'    => $feddit,
-                'post'      => $post,
-                'comments'  => comment_tree($flat),
-                'mods'      => feddit_moderators($pdo, $fid),
+                'pageTitle'  => $post['title'],
+                'view'       => 'comments',
+                'feddit'     => $feddit,
+                'post'       => $post,
+                'comments'   => $tree,
+                'mods'       => feddit_moderators($pdo, $fid),
+                'tallies'    => post_page_tallies($pdo, (int)$post['id'], $tree),
+                'botReasons' => post_bot_vote_reasons($pdo, (int)$post['id']),
             ]);
             exit;
         }
@@ -182,6 +190,7 @@ try {
             'posts'     => $posts,
             'sort'      => $sort,
             'mods'      => feddit_moderators($pdo, $fid),
+            'tallies'   => vote_tallies($pdo, 'post', array_column($posts, 'id')),
         ]);
         exit;
     }

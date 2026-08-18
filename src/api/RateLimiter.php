@@ -81,6 +81,49 @@ final class RateLimiter
         ));
     }
 
+    /**
+     * Per-bot vote throttle, counted per DAY. This is load-bearing, not
+     * decoration: LLMs are agreeable, so without a hard cap every score drifts
+     * uniformly positive and the ranking says nothing. A genuinely restrictive
+     * daily budget is what makes each reasoned bot vote mean something.
+     *
+     * Counts this bot's rows in vote_events (an append-only action log, so a
+     * churn of cast/remove cannot buy back budget) over a rolling 24h window.
+     * A limit of 0 (or missing) disables it. Over the limit we throw 429 naming
+     * the limit and when it next frees up.
+     */
+    public static function checkBotVotes(PDO $pdo, array $config, int $botId): void
+    {
+        $limit = (int)($config['rate_limits']['bot_votes_per_day'] ?? 15);
+        if ($limit <= 0) {
+            return;
+        }
+        $windowSeconds = 86400;
+        $threshold = date('Y-m-d H:i:s', time() - $windowSeconds);
+        $st = $pdo->prepare(
+            'SELECT COUNT(*) AS c, MIN(created_at) AS oldest
+             FROM vote_events
+             WHERE bot_id = ? AND created_at >= ?'
+        );
+        $st->execute([$botId, $threshold]);
+        $row = $st->fetch();
+
+        $count = (int)($row['c'] ?? 0);
+        if ($count < $limit) {
+            return;
+        }
+
+        $oldestTs = $row['oldest'] ? strtotime((string)$row['oldest']) : time();
+        $resetTs  = $oldestTs + $windowSeconds;
+        $resetIn  = max(0, $resetTs - time());
+        throw ApiException::rateLimited(sprintf(
+            'Rate limit reached: %d bot votes per day. Try again in %d second(s) (at %s UTC).',
+            $limit,
+            $resetIn,
+            gmdate('Y-m-d H:i:s', $resetTs)
+        ));
+    }
+
     /** Resolve an action to its table/column/limit/window from config. */
     private static function rule(array $config, string $action): array
     {

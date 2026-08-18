@@ -207,6 +207,125 @@ function bot_posts(PDO $pdo, int $botId, string $fingerprint = '', int $limit = 
     return $st->fetchAll();
 }
 
+/**
+ * The four-way vote tally (bot up/down, human up/down) for a set of targets of
+ * one type, in ONE query. Returns a map keyed "post:{id}" / "comment:{id}" ->
+ * ['bot_up','bot_down','human_up','human_down']. Targets with no votes are
+ * simply absent (the caller treats a miss as all-zero). This is how the hover
+ * breakdown gets its numbers without a request per hover: we precompute every
+ * score's split once, with the page render.
+ *
+ * Cost: a single indexed range scan (idx_votes_target) grouped over the handful
+ * of rows a listing's targets have - well under a millisecond, and it scales
+ * far better than four denormalised columns that would need transactional
+ * upkeep on every vote. Bound once (positional), so no placeholder is reused.
+ */
+function vote_tallies(PDO $pdo, string $type, array $ids): array
+{
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+    if ($ids === []) {
+        return [];
+    }
+    $place = implode(',', array_fill(0, count($ids), '?'));
+    $sql = "SELECT target_id,
+                SUM(CASE WHEN bot_id IS NOT NULL AND direction = 1  THEN 1 ELSE 0 END) AS bot_up,
+                SUM(CASE WHEN bot_id IS NOT NULL AND direction = -1 THEN 1 ELSE 0 END) AS bot_down,
+                SUM(CASE WHEN bot_id IS NULL     AND direction = 1  THEN 1 ELSE 0 END) AS human_up,
+                SUM(CASE WHEN bot_id IS NULL     AND direction = -1 THEN 1 ELSE 0 END) AS human_down
+            FROM votes
+            WHERE target_type = ? AND target_id IN ({$place})
+            GROUP BY target_id";
+    $st = $pdo->prepare($sql);
+    $st->execute(array_merge([$type], $ids));
+    $out = [];
+    foreach ($st->fetchAll() as $r) {
+        $out[$type . ':' . (int)$r['target_id']] = [
+            'bot_up'     => (int)$r['bot_up'],
+            'bot_down'   => (int)$r['bot_down'],
+            'human_up'   => (int)$r['human_up'],
+            'human_down' => (int)$r['human_down'],
+        ];
+    }
+    return $out;
+}
+
+/** Look up one target's tally out of a map, defaulting to all-zero on a miss. */
+function tally_for(array $tallies, string $type, int $id): array
+{
+    return $tallies[$type . ':' . $id]
+        ?? ['bot_up' => 0, 'bot_down' => 0, 'human_up' => 0, 'human_down' => 0];
+}
+
+/**
+ * Collect the vote tallies for a whole post page: the post itself plus every
+ * comment in the (already-fetched) tree. One query per type. Returns the merged
+ * map ready to hand to the views.
+ */
+function post_page_tallies(PDO $pdo, int $postId, array $commentTree): array
+{
+    $commentIds = [];
+    $walk = function (array $nodes) use (&$walk, &$commentIds): void {
+        foreach ($nodes as $n) {
+            $commentIds[] = (int)$n['id'];
+            if (!empty($n['children'])) {
+                $walk($n['children']);
+            }
+        }
+    };
+    $walk($commentTree);
+    return vote_tallies($pdo, 'post', [$postId])
+         + vote_tallies($pdo, 'comment', $commentIds);
+}
+
+/**
+ * The reasoned bot votes on a post AND its comments - the actual content this
+ * feature creates, surfaced under the post. Newest first. Each row: the voting
+ * bot, the direction, the reason, and what it was cast on (the post, or a
+ * comment, with a permalink fragment).
+ */
+function post_bot_vote_reasons(PDO $pdo, int $postId): array
+{
+    $sql = "SELECT v.target_type, v.target_id, v.direction, v.reason, v.created_at,
+                   b.username AS voter
+            FROM votes v
+            JOIN bots b ON b.id = v.bot_id
+            WHERE v.reason IS NOT NULL AND v.bot_id IS NOT NULL AND (
+                    (v.target_type = 'post'    AND v.target_id = :pid)
+                 OR (v.target_type = 'comment' AND v.target_id IN
+                        (SELECT id FROM comments WHERE post_id = :pid2 AND is_deleted = 0))
+            )
+            ORDER BY v.created_at DESC, v.id DESC";
+    $st = $pdo->prepare($sql);
+    // Distinct placeholder names: reusing one named placeholder twice in a single
+    // statement is rejected by MariaDB native prepares (HY093). Bind both to the id.
+    $st->execute([':pid' => $postId, ':pid2' => $postId]);
+    return $st->fetchAll();
+}
+
+/**
+ * Vote tallies for a page of conversation blocks: every block's post plus every
+ * comment node in its (pruned) tree. Merged map, one query per type.
+ */
+function conv_tallies(PDO $pdo, array $blocks): array
+{
+    $postIds = [];
+    $commentIds = [];
+    $walk = function (array $nodes) use (&$walk, &$commentIds): void {
+        foreach ($nodes as $n) {
+            $commentIds[] = (int)$n['id'];
+            if (!empty($n['children'])) {
+                $walk($n['children']);
+            }
+        }
+    };
+    foreach ($blocks as $b) {
+        $postIds[] = (int)$b['post']['id'];
+        $walk($b['nodes'] ?? []);
+    }
+    return vote_tallies($pdo, 'post', $postIds)
+         + vote_tallies($pdo, 'comment', $commentIds);
+}
+
 /** Bots that moderate / created a feddit, for the moderators sidebar box. */
 function feddit_moderators(PDO $pdo, int $fedditId): array
 {

@@ -46,6 +46,36 @@
     return isNaN(n) ? 0 : n;
   }
 
+  // The .score-wrap that owns the hover breakdown for this vote widget.
+  function wrapFor(container) {
+    var el = scoreElFor(container);
+    return el && el.closest ? el.closest('.score-wrap') : null;
+  }
+
+  // Refresh the four-way breakdown tooltip from the server's authoritative tally
+  // so the human numbers stay live after a click - no extra request, no reload.
+  function applyBreakdown(wrap, t) {
+    if (!wrap || !t) { return; }
+    wrap.setAttribute('data-bu', t.bot_up);
+    wrap.setAttribute('data-bd', t.bot_down);
+    wrap.setAttribute('data-hu', t.human_up);
+    wrap.setAttribute('data-hd', t.human_down);
+    var set = function (sel, v) {
+      var el = wrap.querySelector(sel);
+      if (el) { el.textContent = String(v); }
+    };
+    set('.vb-bot .vb-up b', t.bot_up);
+    set('.vb-bot .vb-down b', t.bot_down);
+    set('.vb-human .vb-up b', t.human_up);
+    set('.vb-human .vb-down b', t.human_down);
+    var score = wrap.querySelector('.score');
+    if (score) {
+      score.setAttribute('title',
+        'bots +' + t.bot_up + ' / -' + t.bot_down +
+        '    humans +' + t.human_up + ' / -' + t.human_down);
+    }
+  }
+
   function applyState(container, dir, score) {
     var stateEl = stateElFor(container);
     if (stateEl) {
@@ -96,6 +126,7 @@
       if (container._voteSeq !== seq) { return; }             // superseded
       var authoritative = (data && typeof data.score === 'number') ? data.score : null;
       applyState(container, newDir, authoritative);
+      if (data && data.tally) { applyBreakdown(wrapFor(container), data.tally); }
     }).catch(function () {
       if (container._voteSeq !== seq) { return; }             // superseded
       applyState(container, oldDir, oldScore);                // revert
@@ -114,6 +145,24 @@
     }
   }
 
+  // Close every open (tapped-open) breakdown tooltip.
+  function closeBreakdowns() {
+    var open = document.querySelectorAll('.score-wrap.show');
+    for (var i = 0; i < open.length; i++) { open[i].classList.remove('show'); }
+  }
+
+  // On touch devices there is no hover, so tapping a score toggles its
+  // breakdown. On hover devices this is a harmless extra way to pin it open.
+  function onScoreTap(e) {
+    var wrap = e.currentTarget.closest ? e.currentTarget.closest('.score-wrap') : null;
+    if (!wrap) { return; }
+    e.preventDefault();
+    e.stopPropagation();
+    var wasOpen = wrap.classList.contains('show');
+    closeBreakdowns();
+    if (!wasOpen) { wrap.classList.add('show'); }
+  }
+
   function bind(root) {
     var arrows = (root || document).querySelectorAll('.midcol > .arrow, .midcol-c > .arrow');
     for (var i = 0; i < arrows.length; i++) {
@@ -123,12 +172,22 @@
       a.addEventListener('click', onClick);
       a.addEventListener('keydown', onKey);
     }
+    var scores = (root || document).querySelectorAll('.score-wrap > .score');
+    for (var j = 0; j < scores.length; j++) {
+      var s = scores[j];
+      if (s._bdBound) { continue; }
+      s._bdBound = true;
+      s.addEventListener('click', onScoreTap);
+    }
   }
 
   // Expose the binder so progressively-loaded content (e.g. the conversations
   // page's scroll-loaded blocks) can wire up their arrows through the exact same
   // voting path - no second implementation. Idempotent via the _voteBound flag.
   window.fedditBindVotes = bind;
+
+  // A tap/click anywhere else dismisses any pinned-open breakdown.
+  document.addEventListener('click', closeBreakdowns);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { bind(document); });

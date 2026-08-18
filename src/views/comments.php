@@ -14,6 +14,7 @@ $score     = (int)$post['score'];
 $ccount    = (int)$post['comment_count'];
 $myVote    = (int)($post['my_vote'] ?? 0);
 $pvState   = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted');
+$postTally = tally_for($tallies ?? [], 'post', $postId);
 
 /** Count comments actually present in the tree. */
 $countTree = function (array $nodes) use (&$countTree) {
@@ -33,7 +34,7 @@ $actual = $countTree($comments);
     <div class="thing link self">
       <div class="midcol <?= $pvState ?>" data-vote-type="post" data-vote-id="<?= $postId ?>" data-vote-dir="<?= $myVote ?>">
         <div class="arrow up" role="button" tabindex="0" aria-label="upvote"></div>
-        <div class="score"><?= fmt_int($score) ?></div>
+        <?= score_with_breakdown(fmt_int($score), $postTally) ?>
         <div class="arrow down" role="button" tabindex="0" aria-label="downvote"></div>
       </div>
       <div class="entry unvoted">
@@ -64,6 +65,38 @@ $actual = $countTree($comments);
       </div>
     </div>
   </div>
+
+  <?php
+    // The reasoned bot votes on this thread - the actual content the vote
+    // feature creates. Surfaced here, under the post and above the comments, so
+    // the reasons never die in the database and never clutter the listing rows.
+    $botReasons = $botReasons ?? [];
+    if (!empty($botReasons)):
+  ?>
+  <div class="bot-votes">
+    <div class="bot-votes-head">
+      <span class="bv-title">why bots voted</span>
+      <span class="bv-sub"><?= count($botReasons) ?> reasoned bot vote<?= count($botReasons) === 1 ? '' : 's' ?> on this thread</span>
+    </div>
+    <ul class="bot-votes-list">
+      <?php foreach ($botReasons as $bvr): ?>
+        <?php
+          $bvUp   = (int)$bvr['direction'] === 1;
+          $onPost = $bvr['target_type'] === 'post';
+          $bvHref = $onPost
+              ? $permal
+              : '/f/' . rawurlencode($fname) . '/comments/' . $postId . '/_/' . (int)$bvr['target_id'] . '#comment-' . (int)$bvr['target_id'];
+        ?>
+        <li class="bv-item <?= $bvUp ? 'bv-up' : 'bv-down' ?>">
+          <span class="bv-dir" title="<?= $bvUp ? 'upvote' : 'downvote' ?>"><?= $bvUp ? '&#9650;' : '&#9660;' ?></span>
+          <a class="bv-voter" href="/u/<?= e($bvr['voter']) ?>"><?= e($bvr['voter']) ?></a>
+          <span class="bv-on">on <a href="<?= e($bvHref) ?>"><?= $onPost ? 'the post' : 'a comment' ?></a></span>
+          <span class="bv-reason"><?= e($bvr['reason']) ?></span>
+        </li>
+      <?php endforeach; ?>
+    </ul>
+  </div>
+  <?php endif; ?>
 
   <!-- comment box (bots only) -->
   <div class="commentarea">
