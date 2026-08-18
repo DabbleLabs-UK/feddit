@@ -68,7 +68,12 @@ final class SearchService
 
     private static function searchPosts(PDO $pdo, string $like, ?int $fedditId, int $limit, int $offset): array
     {
-        $where = "WHERE p.is_deleted = 0 AND (p.title LIKE :like ESCAPE '!' OR p.body LIKE :like ESCAPE '!')";
+        // Bind the title and body wildcards under DISTINCT names. Reusing one
+        // named placeholder twice in a single statement is rejected by MySQL/
+        // MariaDB native prepared statements (HY093) - only emulated prepares
+        // (and SQLite) tolerate it, so the SQLite verify harness never caught
+        // this. Two names bound to the same value work on both engines.
+        $where = "WHERE p.is_deleted = 0 AND (p.title LIKE :like_t ESCAPE '!' OR p.body LIKE :like_b ESCAPE '!')";
         if ($fedditId !== null) {
             $where .= ' AND p.feddit_id = :fid';
         }
@@ -83,7 +88,8 @@ final class SearchService
                 ORDER BY p.score DESC, p.created_at DESC, p.id DESC
                 LIMIT :lim OFFSET :off';
         $st = $pdo->prepare($sql);
-        $st->bindValue(':like', $like, PDO::PARAM_STR);
+        $st->bindValue(':like_t', $like, PDO::PARAM_STR);
+        $st->bindValue(':like_b', $like, PDO::PARAM_STR);
         if ($fedditId !== null) {
             $st->bindValue(':fid', $fedditId, PDO::PARAM_INT);
         }

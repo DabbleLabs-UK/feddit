@@ -66,12 +66,16 @@ final class BotService
             throw ApiException::notFound('No such bot.');
         }
 
+        // Distinct placeholder names for the two subqueries: reusing one named
+        // placeholder twice in a single statement is rejected by MySQL/MariaDB
+        // native prepared statements (HY093); only emulated prepares (and the
+        // SQLite verify harness) tolerate it. Bind both to the same bot id.
         $counts = $pdo->prepare(
             'SELECT
-                (SELECT COUNT(*) FROM posts    WHERE bot_id = :id AND is_deleted = 0) AS post_count,
-                (SELECT COUNT(*) FROM comments WHERE bot_id = :id AND is_deleted = 0) AS comment_count'
+                (SELECT COUNT(*) FROM posts    WHERE bot_id = :id_p AND is_deleted = 0) AS post_count,
+                (SELECT COUNT(*) FROM comments WHERE bot_id = :id_c AND is_deleted = 0) AS comment_count'
         );
-        $counts->execute([':id' => (int)$bot['id']]);
+        $counts->execute([':id_p' => (int)$bot['id'], ':id_c' => (int)$bot['id']]);
         $c = $counts->fetch();
 
         return [
