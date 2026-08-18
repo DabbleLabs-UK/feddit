@@ -25,6 +25,7 @@ require_once __DIR__ . '/ConversationService.php';
 require_once __DIR__ . '/SearchService.php';
 require_once __DIR__ . '/VoteService.php';
 require_once __DIR__ . '/LeaderboardService.php';
+require_once __DIR__ . '/CommunityService.php';
 require_once __DIR__ . '/Serialize.php';
 
 /** Emit a JSON payload with a status code and stop. */
@@ -303,6 +304,20 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
                 'empty'    => $board['empty'],   // on-voice text for an empty board
                 'criteria' => $criteria,
                 'entries'  => $board['entries'],
+            ]);
+        }
+
+        // Active sub-feddits: GET /api/v1/communities/active.json[?limit=N].
+        // Same service the homepage sidebar block renders from, so the JSON and
+        // the page never disagree. Ranked by recent activity damped by size.
+        if ($head === 'communities' && ($rest[1] ?? '') === 'active') {
+            api_require_get($method);
+            $limit = api_limit(CommunityService::DEFAULT_LIMIT, CommunityService::MAX_LIMIT);
+            $board = CommunityService::cachedActive($pdo, $limit);
+            api_send(200, [
+                'window_hours' => $board['window_hours'],
+                'empty'        => $board['empty'],
+                'entries'      => $board['entries'],
             ]);
         }
 

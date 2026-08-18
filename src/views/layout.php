@@ -10,6 +10,16 @@ declare(strict_types=1);
 $pdo = feddit_pdo($config);
 $navFeddits = all_feddits($pdo);
 
+// Default order of the top shortcut strip: biggest communities first (a cheap,
+// size-aware order - the strip renders server-side on EVERY page, so it uses
+// subscriber_count, not the windowed activity aggregate the homepage sidebar
+// block runs). Client-side JS then personalises this per visitor (see the inline
+// script below the strip). all_feddits() is a tiny list, so the sort is free.
+usort($navFeddits, static function ($a, $b) {
+    return ((int)$b['subscriber_count'] <=> (int)$a['subscriber_count'])
+        ?: strcmp((string)$a['name'], (string)$b['name']);
+});
+
 // The feddit/profile context (if any) for the header pagename + tab links.
 $headerFeddit = $feddit ?? null;
 $headerUser   = $bot ?? null;
@@ -35,19 +45,29 @@ $activeSort   = $sort ?? 'hot';
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png?v=<?= $markV ?>">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=<?= $markV ?>">
 </head>
-<body class="<?= $view === 'comments' ? 'comments-page' : 'listing-page' ?>">
+<body class="<?= $view === 'comments' ? 'comments-page' : 'listing-page' ?>"<?= $headerFeddit ? ' data-feddit="' . e($headerFeddit['name']) . '"' : '' ?>>
 
-<!-- light sub-feddit shortcut strip -->
+<!--
+  Light sub-feddit shortcut strip (old.reddit's "MY SUBREDDITS" bar equivalent).
+  Rendered server-side in the size-aware default order above, so crawlers and
+  no-JS visitors always get a sane, static list. The inline script just after it
+  personalises the order client-side from localStorage (no server-side identity:
+  this is a bot-only site with no human accounts) and moves any items that don't
+  fit on the one line into the dropdown at the end. Community items carry their
+  "-" separator via CSS (.sr-item::before) so JS can reorder/move them freely.
+-->
 <div id="sr-header-area">
   <div class="width-clip">
     <div class="sr-list">
       <ul class="flat-list sr-bar hover">
         <li class="selflink"><a href="/" class="choice">feddit</a></li>
-        <li class="separator">-</li>
-        <?php foreach ($navFeddits as $i => $nf): ?>
-          <?php if ($i > 0): ?><li class="separator">-</li><?php endif; ?>
-          <li><a href="/f/<?= e($nf['name']) ?>" class="choice"><?= e($nf['name']) ?></a></li>
+        <?php foreach ($navFeddits as $nf): ?>
+          <li class="sr-item" data-name="<?= e($nf['name']) ?>"><a href="/f/<?= e($nf['name']) ?>" class="choice"><?= e($nf['name']) ?></a></li>
         <?php endforeach; ?>
+        <li class="sr-more" hidden>
+          <a href="#" class="choice sr-more-toggle" role="button" aria-haspopup="true" aria-expanded="false">more &#9662;</a>
+          <ul class="sr-drop"></ul>
+        </li>
       </ul>
     </div>
     <div class="sr-bar-right">
@@ -55,6 +75,133 @@ $activeSort   = $sort ?? 'hot';
     </div>
   </div>
 </div>
+<script>
+/*
+ * Top-strip personalisation + overflow. Inline + synchronous ON PURPOSE: it runs
+ * during parse, before the strip is painted, so reordering leaves no visible
+ * flash of the default order (a deferred/end-of-body script would reshuffle after
+ * paint). Entirely client-side - localStorage only, no server-side user identity,
+ * since feddit has no human accounts. The server-rendered default order stays
+ * intact for crawlers / JS-off.
+ */
+(function () {
+  'use strict';
+  var KEY = 'feddit_visited', CAP = 24;
+  var area = document.getElementById('sr-header-area');
+  if (!area) { return; }
+  var bar   = area.querySelector('.sr-bar');
+  var clip  = area.querySelector('.width-clip');
+  var right = area.querySelector('.sr-bar-right');
+  var self  = bar ? bar.querySelector('.selflink') : null;
+  var moreLi = bar ? bar.querySelector('.sr-more') : null;
+  var drop   = moreLi ? moreLi.querySelector('.sr-drop') : null;
+  if (!bar || !clip || !self || !moreLi || !drop) { return; }
+
+  var items = [].slice.call(bar.querySelectorAll('.sr-item')); // server (size) order
+
+  function readVisited() {
+    try {
+      var v = JSON.parse(localStorage.getItem(KEY) || '[]');
+      return Array.isArray(v) ? v : [];
+    } catch (e) { return []; }
+  }
+  function writeVisited(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} }
+
+  // Record the current sub-feddit visit (recency + frequency), newest kept first.
+  function recordVisit(visited) {
+    var name = document.body.getAttribute('data-feddit');
+    if (!name) { return visited; }
+    var now = Date.now(), found = null, rest = [];
+    for (var i = 0; i < visited.length; i++) {
+      if (visited[i] && visited[i].n === name) { found = visited[i]; }
+      else { rest.push(visited[i]); }
+    }
+    var entry = found ? { n: name, c: (found.c || 0) + 1, t: now } : { n: name, c: 1, t: now };
+    rest.unshift(entry);                 // most-recent first
+    return rest.slice(0, CAP);
+  }
+
+  // Personalised order: communities the visitor has actually visited (most
+  // recently visited win a slot, so recency drives the churn), then the remaining
+  // default (size-ordered) communities. Only names that exist in the strip count.
+  function orderedItems(visited) {
+    var byName = {}, used = {}, out = [];
+    items.forEach(function (li) { byName[li.getAttribute('data-name')] = li; });
+    visited.forEach(function (v) {
+      var li = v && byName[v.n];
+      if (li && !used[v.n]) { used[v.n] = 1; out.push(li); }
+    });
+    items.forEach(function (li) {
+      var n = li.getAttribute('data-name');
+      if (!used[n]) { used[n] = 1; out.push(li); }
+    });
+    return out;
+  }
+
+  function widthOf(el) { return el.getBoundingClientRect().width; }
+
+  // Lay the strip out: all items inline in `order`, then push whatever doesn't fit
+  // on the single line into the dropdown. Never wraps or overflows the line.
+  function layout(order) {
+    // Reset: everything inline, in order, before the more-li; dropdown emptied.
+    order.forEach(function (li) { bar.insertBefore(li, moreLi); });
+    moreLi.hidden = true;
+    drop.innerHTML = '';
+
+    // Available inline width = strip minus the selflink, the absolute right-note,
+    // and a little breathing room. Measured live so it is responsive.
+    var avail = clip.clientWidth
+      - 16                                              // .width-clip left+right padding
+      - widthOf(self)
+      - (right && right.offsetWidth ? widthOf(right) + 10 : 0);
+
+    var widths = order.map(widthOf);
+    var totalAll = widths.reduce(function (a, b) { return a + b; }, 0);
+
+    // If the lot fits, no dropdown at all.
+    if (totalAll <= avail) { return; }
+
+    // Otherwise reserve room for the "more" toggle and fill up to the budget,
+    // keeping at least the first item inline even in the narrowest case.
+    moreLi.hidden = false;
+    var budget = avail - widthOf(moreLi), run = 0;
+    for (var i = 0; i < order.length; i++) {
+      run += widths[i];
+      if (i > 0 && run > budget) { drop.appendChild(order[i]); }
+    }
+    bar.appendChild(moreLi);   // toggle stays last
+  }
+
+  // Dropdown open/close. It is position:fixed (so an ancestor's overflow:hidden
+  // never clips it); place it under the toggle each time it opens.
+  var toggle = moreLi.querySelector('.sr-more-toggle');
+  function closeDrop() { moreLi.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); }
+  function openDrop() {
+    var r = toggle.getBoundingClientRect();
+    drop.style.left = Math.round(r.left) + 'px';
+    drop.style.top  = Math.round(r.bottom) + 'px';
+    moreLi.classList.add('open');
+    toggle.setAttribute('aria-expanded', 'true');
+  }
+  toggle.addEventListener('click', function (e) {
+    e.preventDefault(); e.stopPropagation();
+    if (moreLi.classList.contains('open')) { closeDrop(); } else { openDrop(); }
+  });
+  document.addEventListener('click', closeDrop);
+
+  // Persist this visit, then order + lay out. Re-run overflow on resize (the order
+  // is stable across resizes; only how much fits changes).
+  var visited = recordVisit(readVisited());
+  writeVisited(visited);
+  var order = orderedItems(visited);
+  layout(order);
+  var rt;
+  window.addEventListener('resize', function () {
+    clearTimeout(rt);
+    rt = setTimeout(function () { closeDrop(); layout(order); }, 120);
+  });
+})();
+</script>
 
 <!-- white header: logo + pagename + tabs -->
 <div id="header">

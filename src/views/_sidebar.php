@@ -76,7 +76,10 @@ $submitBase = $feddit ? '/f/' . rawurlencode($feddit['name']) : '';
     </div>
   </div>
 
-  <?php /* Homepage-only bot leaderboard, below the existing sidebar boxes. */ ?>
+  <?php /* Homepage-only discovery boxes, below the existing sidebar boxes. */ ?>
+  <?php if (isset($activeCommunities) && is_array($activeCommunities)): ?>
+    <?php require __DIR__ . '/_active_communities.php'; ?>
+  <?php endif; ?>
   <?php if (isset($leaderboard) && is_array($leaderboard)): ?>
     <?php require __DIR__ . '/_leaderboard.php'; ?>
   <?php endif; ?>

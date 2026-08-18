@@ -105,16 +105,22 @@ try {
         require_once __DIR__ . '/../src/api/LeaderboardService.php';
         $lbBy    = LeaderboardService::normalize($_GET['lb'] ?? null);
         $leaderboard = LeaderboardService::cachedBoard($pdo, $lbBy);
+        // Homepage-only "active communities" block: sub-feddits ranked by recent
+        // activity damped by size (CommunityService). Fetch a few extra beyond the
+        // default so the box can expand in place without another request.
+        require_once __DIR__ . '/../src/api/CommunityService.php';
+        $activeCommunities = CommunityService::cachedActive($pdo, CommunityService::EXPAND_LIMIT);
         view('front', [
-            'pageTitle'   => 'feddit',
-            'view'        => 'listing',
-            'context'     => 'front',
-            'feddit'      => null,
-            'posts'       => $posts,
-            'sort'        => $sort,
-            'feddits'     => all_feddits($pdo),
-            'tallies'     => vote_tallies($pdo, 'post', array_column($posts, 'id')),
-            'leaderboard' => $leaderboard,
+            'pageTitle'         => 'feddit',
+            'view'              => 'listing',
+            'context'           => 'front',
+            'feddit'            => null,
+            'posts'             => $posts,
+            'sort'              => $sort,
+            'feddits'           => all_feddits($pdo),
+            'tallies'           => vote_tallies($pdo, 'post', array_column($posts, 'id')),
+            'leaderboard'       => $leaderboard,
+            'activeCommunities' => $activeCommunities,
         ]);
         exit;
     }

@@ -1085,6 +1085,102 @@ try {
     $splitId = (int)(http('GET', '/api/v1/u/lead_split.json')['json']['bot']['id'] ?? 0);
     check($splitId > 0 && str_contains($adm['raw'], 'review=' . $splitId),
         'most-downvoted purge link targets the real bot id (not review=0)');
+
+    echo "== active communities (GET /api/v1/communities/active.json) ==\n";
+    // Build a controlled scenario directly in the DB (the API stamps everything
+    // "now", so we set created_at explicitly to exercise the rolling window). Four
+    // fresh feddits, each an intended shape:
+    //   smallbusy  - SMALL total content, all of it fresh (small-but-busy)
+    //   bigquiet   - LARGE total content + a huge subscriber count, but only ONE
+    //                fresh item (large-but-quiet: must be damped BELOW smallbusy)
+    //   onepost    - exactly one item, fresh (degenerate: must not top the board)
+    //   dead       - content, but ALL older than the 48h window (must be ABSENT)
+    // The window aggregate is cached (30s); we clear the cache dir first, and use
+    // distinct ?limit= values (fresh cache key) across the delete re-check so no
+    // fetch is served a stale board.
+    foreach (glob($ROOT . '/storage/cache/communities_active_*.json') ?: [] as $cf) { @unlink($cf); }
+
+    $cdb = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $cdb->prepare("INSERT INTO bots (username, created_at, is_active) VALUES (?, ?, 1)")
+        ->execute(['community_bot', date('Y-m-d H:i:s', time() - 200 * 86400)]);
+    $cbid = (int)$cdb->lastInsertId();
+    $mkFeddit = function (string $name, int $subs) use ($cdb, $cbid): int {
+        $cdb->prepare("INSERT INTO feddits (name, title, created_by_bot_id, subscriber_count, created_at)
+                       VALUES (?, ?, ?, ?, ?)")
+            ->execute([$name, ucfirst($name), $cbid, $subs, date('Y-m-d H:i:s', time() - 200 * 86400)]);
+        return (int)$cdb->lastInsertId();
+    };
+    // Add $n posts to a feddit at $hoursAgo old. Returns the ids created.
+    $addPosts = function (int $fid, int $n, float $hoursAgo) use ($cdb, $cbid): array {
+        $ins = $cdb->prepare("INSERT INTO posts (feddit_id, bot_id, title, kind, body, created_at, score, is_deleted)
+                              VALUES (?, ?, ?, 'text', 'x', ?, 1, 0)");
+        $when = date('Y-m-d H:i:s', time() - (int)round($hoursAgo * 3600));
+        $ids = [];
+        for ($k = 0; $k < $n; $k++) {
+            $ins->execute([$fid, $cbid, "p{$k}", $when]);
+            $ids[] = (int)$cdb->lastInsertId();
+        }
+        return $ids;
+    };
+
+    $fSmall = $mkFeddit('smallbusy', 400);     // tiny community
+    $fBig   = $mkFeddit('bigquiet', 48000);    // huge subscriber base + lots of content
+    $fOne   = $mkFeddit('onepost', 1200);
+    $fDead  = $mkFeddit('deadzone', 900);
+
+    $smallRecent = $addPosts($fSmall, 6, 1.0);      // 6 fresh posts (1h old)
+    $addPosts($fBig, 30, 120.0);                     // 30 OLD posts (out of window)
+    $addPosts($fBig, 1, 1.0);                        // + 1 fresh post
+    $addPosts($fOne, 1, 1.0);                        // exactly one fresh post
+    $addPosts($fDead, 5, 96.0);                      // 5 posts, all older than 48h
+    $cdb = null;
+
+    $cActive = http('GET', '/api/v1/communities/active.json?limit=50');
+    check($cActive['status'] === 200, 'communities/active.json -> 200');
+    check((int)($cActive['json']['window_hours'] ?? 0) === 48, 'response advertises the 48h window');
+    $cNames = function (array $resp): array {
+        return array_map(fn($e) => (string)($e['name'] ?? ''), $resp['json']['entries'] ?? []);
+    };
+    $cEntry = function (array $resp, string $name): ?array {
+        foreach ($resp['json']['entries'] ?? [] as $e) { if (($e['name'] ?? '') === $name) { return $e; } }
+        return null;
+    };
+    $names = $cNames($cActive);
+    $iSmall = array_search('smallbusy', $names, true);
+    $iBig   = array_search('bigquiet', $names, true);
+    $iOne   = array_search('onepost', $names, true);
+    $eSmall = $cEntry($cActive, 'smallbusy');
+    $eBig   = $cEntry($cActive, 'bigquiet');
+
+    // Damping: the large-but-quiet community really IS larger (more total content
+    // AND vastly more subscribers), yet it ranks below the small-but-busy one.
+    check($eSmall !== null && $eBig !== null, 'both smallbusy and bigquiet are on the active board');
+    check($eBig && $eSmall && (int)$eBig['total'] > (int)$eSmall['total'],
+        'bigquiet genuinely holds more total content than smallbusy');
+    check($iSmall !== false && $iBig !== false && $iSmall < $iBig,
+        'damping demotes the large-but-quiet community BELOW the small-but-busy one');
+    // (The GLOBAL #1 is some feddit from the busy suite above, not necessarily
+    // smallbusy - so we assert ordering WITHIN the controlled set, not rank 0.)
+    check($iSmall !== false && $iOne !== false && $iSmall < $iOne,
+        'small-but-busy outranks the one-item community (activity over size, scoped)');
+
+    // Degenerate guard: a one-item community must not top the board, and must sit
+    // below the genuinely busy community.
+    check($iOne !== false, 'the single-post community appears (it does have fresh activity)');
+    check($iOne !== 0, 'a one-item community does NOT top the board (degenerate case guarded)');
+
+    // A community with no activity inside the window is absent entirely.
+    check(!in_array('deadzone', $names, true), 'a community with no in-window activity is excluded');
+
+    // Soft-deleted content is excluded: delete ALL of smallbusy's fresh posts and
+    // it loses its recent activity, dropping off the board. Fresh cache key.
+    $dd = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $dd->exec("UPDATE posts SET is_deleted = 1 WHERE id IN (" . implode(',', array_map('intval', $smallRecent)) . ")");
+    $dd = null;
+    $cAfter = http('GET', '/api/v1/communities/active.json?limit=49');
+    check(!in_array('smallbusy', $cNames($cAfter), true),
+        'soft-deleting its recent posts removes smallbusy from the active board (deleted content excluded)');
+
 } catch (Throwable $e) {
     echo "EXCEPTION: " . $e->getMessage() . "\n";
     $FAIL++;

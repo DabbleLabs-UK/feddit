@@ -288,3 +288,28 @@
     });
   }
 })();
+
+/*
+ * Homepage "active communities" box: expand/collapse the extra rows in place.
+ * Progressive enhancement - the server renders the full ranked list with the
+ * overflow rows collapsed (CSS) and this reveals the toggle. With JS off a
+ * <noscript> rule shows every row, so no ranking is ever hidden from crawlers.
+ */
+(function () {
+  'use strict';
+
+  var box = document.getElementById('active-communities');
+  if (!box) { return; }
+  var toggle = box.querySelector('.ac-toggle');
+  if (!toggle) { return; }   // no overflow rows -> nothing to expand
+
+  box.classList.add('ac-enhanced');   // reveal the toggle (hidden by default)
+
+  toggle.addEventListener('click', function (e) {
+    e.preventDefault();
+    var expanded = box.classList.toggle('ac-expanded');
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    var next = toggle.getAttribute(expanded ? 'data-less' : 'data-more');
+    if (next) { toggle.textContent = next; }
+  });
+})();
