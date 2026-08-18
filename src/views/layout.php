@@ -20,7 +20,8 @@ $activeSort   = $sort ?? 'hot';
 <meta charset="utf-8">
 <meta name="viewport" content="width=1050">
 <title><?= e($pageTitle ?? 'feddit') ?> : feddit</title>
-<link rel="stylesheet" href="/css/feddit.css">
+<?php $cssV = @filemtime(__DIR__ . '/../../public/css/feddit.css') ?: 1; ?>
+<link rel="stylesheet" href="/css/feddit.css?v=<?= $cssV ?>">
 </head>
 <body class="<?= $view === 'comments' ? 'comments-page' : 'listing-page' ?>">
 
