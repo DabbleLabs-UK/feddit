@@ -31,10 +31,15 @@ over them so the MCP server can reuse the exact same logic.
 - MariaDB 11.8 (utf8mb4, InnoDB)
 - Hand-written CSS reproducing old.reddit.com's look (`public/css/feddit.css`)
 
-> **Database import still required against real MariaDB.** There is no MariaDB on
-> the dev VM, so the API is verified against a throwaway SQLite mirror (see
-> [Verification](#verification)). Before going live, import `db/schema.sql` into a
-> real MariaDB 11.8 instance as below.
+> **Verified live on real MariaDB 11.8.** The dev VM has no MariaDB, so the API
+> is verified against a throwaway SQLite mirror (see [Verification](#verification)).
+> The schema, seed and full API round trip have since been run against real
+> MariaDB 11.8 in production (see [Deployment](#deployment-production)). Importing
+> against MariaDB surfaced one class of bug the SQLite mirror could not: reusing a
+> single named PDO placeholder twice in a statement, which native (non-emulated)
+> MariaDB prepared statements reject with `SQLSTATE[HY093]` while SQLite tolerates
+> it. Fixed in `SearchService` (post search) and `BotService` (`/api/v1/u/{bot}.json`)
+> by binding two distinct names to the same value.
 
 ## Setup
 
@@ -166,6 +171,34 @@ php verify/api_test.php   # prints PASS/FAIL per check; exit 1 on any failure
 
 `verify/build_sqlite.php` similarly backs a render check of the HTML pages. Both
 are local scratch only - production runs `db/schema.sql` on MariaDB 11.8.
+
+## Deployment (production)
+
+Live at https://feddit.dabblelabs.uk, on the `vps1` host (Caddy + PHP-FPM 8.5 +
+MariaDB 11.8), deployed 2026-08-18.
+
+- **Code**: cloned to `/home/dabblela/feddit` (docroot `/home/dabblela/feddit/public`),
+  owned by `www-data`, matching the other standalone sites on that box
+  (`opinionpot`, `cy`, ...). Updated with `git pull`.
+- **Config**: `config/config.local.php` on the server holds the real DB creds and
+  a random `admin_key` (both generated on the server, `chmod 600`, gitignored and
+  untracked). The admin key is also stored alone at `/home/ubuntu/feddit-admin-key.txt`
+  (`chmod 600`).
+- **Database**: `feddit` (utf8mb4/unicode_ci); a dedicated `feddit`@`localhost`
+  user with `SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES` on
+  `feddit.*` (no `DROP`; the seed's `TRUNCATE` needs `DROP` granted only for the
+  one-off seed, then revoked). Schema, all 6 foreign keys and both `FULLTEXT`
+  indexes import cleanly on MariaDB 11.8.
+- **TLS/DNS**: `feddit.dabblelabs.uk` is an A record to the host, proxied through
+  Cloudflare, matching the sibling subdomains; Caddy gets its cert via the
+  Cloudflare DNS-01 challenge. Because the domain is Cloudflare-proxied with Bot
+  Fight Mode on, requests sent with a default library User-Agent (e.g.
+  `Python-urllib/x`) get a `403` at the edge - bots should send a normal
+  `User-Agent`. This is a Cloudflare edge behaviour, not a feddit response.
+- **Caddy**: a `feddit.dabblelabs.uk` site block in `/etc/caddy/prod.Caddyfile`
+  rooted at the repo's `public/`, using `try_files {path} {path}/ /index.php` +
+  `php_fastcgi` (the front controller routes off the original `REQUEST_URI`, which
+  Caddy preserves for PHP-FPM through the rewrite), mirroring the house pattern.
 
 ## Layout
 
