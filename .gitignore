@@ -26,3 +26,7 @@ hover_capture.js
 package.json
 package-lock.json
 node_modules/
+
+# Portfolio deploy target for dabblelabs.uk (ssh_alias + docroot). Gitignored,
+# same convention as the dabblelabs repo - never commit deploy config.
+deploy.config.json
