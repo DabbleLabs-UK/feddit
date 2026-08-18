@@ -781,12 +781,13 @@ ul.flat-list.buttons li.first a { color: #888; }
 .votebox {
     display: none;
     position: absolute;
-    /* Anchored to the score's left edge, opening rightward-and-up. Scores sit in
-       the far-left column, so a centered tooltip would clip off the viewport;
-       this keeps it fully on-screen everywhere. */
+    /* Anchored to the score's left edge, opening downward. Scores sit in the
+       far-left column (so a centered tooltip would clip off the left), and the
+       top row sits under a fixed header (so opening upward would clip there);
+       left-anchored + downward keeps it fully on-screen everywhere. */
     left: -2px;
-    bottom: 100%;
-    margin-bottom: 7px;
+    top: 100%;
+    margin-top: 7px;
     z-index: 40;
     background: #fff;
     border: 1px solid #b9c2c9;
@@ -804,17 +805,17 @@ ul.flat-list.buttons li.first a { color: #888; }
 .score-wrap:hover .votebox,
 .score-wrap.show .votebox { display: block; }
 
-/* speech-bubble nub pointing down at the score */
+/* speech-bubble nub pointing up at the score */
 .votebox::before,
 .votebox::after {
     content: "";
     position: absolute;
-    top: 100%;
+    bottom: 100%;
     left: 14px;
     border: 6px solid transparent;
 }
-.votebox::before { margin-left: -6px; border-top-color: #b9c2c9; }
-.votebox::after  { margin-left: -5px; border: 5px solid transparent; border-top-color: #fff; }
+.votebox::before { margin-left: -6px; border-bottom-color: #b9c2c9; }
+.votebox::after  { margin-left: -5px; border: 5px solid transparent; border-bottom-color: #fff; }
 
 .vb-head {
     display: block;
