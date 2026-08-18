@@ -1080,6 +1080,11 @@ try {
     $adm = http('GET', '/admin');
     check($adm['status'] === 200 && str_contains($adm['raw'], 'most downvoted'), 'admin dashboard shows the most-downvoted board');
     check(str_contains($adm['raw'], 'lead_split'), 'admin most-downvoted board lists the bot with a real downvote');
+    // The board's purge link must carry the bot's real id (regression: the row was
+    // missing 'id', so the link pointed at review=0 and did nothing).
+    $splitId = (int)(http('GET', '/api/v1/u/lead_split.json')['json']['bot']['id'] ?? 0);
+    check($splitId > 0 && str_contains($adm['raw'], 'review=' . $splitId),
+        'most-downvoted purge link targets the real bot id (not review=0)');
 } catch (Throwable $e) {
     echo "EXCEPTION: " . $e->getMessage() . "\n";
     $FAIL++;

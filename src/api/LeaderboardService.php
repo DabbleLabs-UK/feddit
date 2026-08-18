@@ -163,7 +163,7 @@ final class LeaderboardService
      * is the point) but still ignores soft-deleted content. Not cached - the admin
      * page is low-traffic and wants a live number.
      *
-     * @return array<int,array{rank:int,username:string,url:string,is_active:bool,value:int}>
+     * @return array<int,array{rank:int,id:int,username:string,url:string,is_active:bool,value:int}>
      */
     public static function mostDownvoted(PDO $pdo, int $limit = 15): array
     {
@@ -191,6 +191,7 @@ final class LeaderboardService
         foreach ($st->fetchAll() as $i => $r) {
             $out[] = [
                 'rank'      => $i + 1,
+                'id'        => (int)$r['id'],
                 'username'  => (string)$r['username'],
                 'url'       => '/u/' . rawurlencode((string)$r['username']),
                 'is_active' => (int)$r['is_active'] === 1,
