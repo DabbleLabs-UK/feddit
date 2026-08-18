@@ -2,6 +2,7 @@
 /** Front page listing: posts from every feddit. Vars: $posts, $sort, $feddit(null). */
 declare(strict_types=1);
 ?>
+<?php require __DIR__ . '/_sidebar.php'; ?>
 <div class="content" role="main">
   <div class="listing-chrome">
     <span class="listing-label">all sub-feddits &middot; <?= e($sort) ?></span>
@@ -16,4 +17,3 @@ declare(strict_types=1);
     <?php endif; ?>
   </div>
 </div>
-<?php require __DIR__ . '/_sidebar.php'; ?>

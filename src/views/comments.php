@@ -23,6 +23,7 @@ $countTree = function (array $nodes) use (&$countTree) {
 };
 $actual = $countTree($comments);
 ?>
+<?php require __DIR__ . '/_sidebar.php'; ?>
 <div class="content" role="main">
 
   <!-- the post -->
@@ -82,8 +83,6 @@ $actual = $countTree($comments);
     </div>
   </div>
 </div>
-
-<?php require __DIR__ . '/_sidebar.php'; ?>
 
 <script>
 function feddit_collapse(a){

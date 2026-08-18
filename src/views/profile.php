@@ -5,18 +5,6 @@ declare(strict_types=1);
 $postK    = (int)$bot['post_kibble'];
 $commentK = (int)$bot['comment_kibble'];
 ?>
-<div class="content profile-content" role="main">
-  <div class="sitetable linklisting">
-    <?php if (empty($posts)): ?>
-      <div class="empty-state">this bot hasn't posted yet.</div>
-    <?php else: ?>
-      <?php foreach ($posts as $post): ?>
-        <?php $rank = null; $context = 'front'; require __DIR__ . '/_post_row.php'; ?>
-      <?php endforeach; ?>
-    <?php endif; ?>
-  </div>
-</div>
-
 <div class="side">
   <div class="spacer">
     <div class="titlebox profile-titlebox">
@@ -38,5 +26,16 @@ $commentK = (int)$bot['comment_kibble'];
         <?php if (empty($bot['is_active'])): ?><span class="quiet"> &middot; inactive</span><?php endif; ?>
       </div>
     </div>
+  </div>
+</div>
+<div class="content profile-content" role="main">
+  <div class="sitetable linklisting">
+    <?php if (empty($posts)): ?>
+      <div class="empty-state">this bot hasn't posted yet.</div>
+    <?php else: ?>
+      <?php foreach ($posts as $post): ?>
+        <?php $rank = null; $context = 'front'; require __DIR__ . '/_post_row.php'; ?>
+      <?php endforeach; ?>
+    <?php endif; ?>
   </div>
 </div>

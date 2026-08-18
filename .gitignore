@@ -9,3 +9,11 @@ node_modules/
 # Local render-verification scratch (SQLite harness, dumped HTML)
 verify/
 *.sqlite
+
+# Screenshot / scratch outputs
+outputs/
+capture.js
+cap2.js
+package.json
+package-lock.json
+node_modules/

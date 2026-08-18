@@ -19,7 +19,7 @@ a:hover { text-decoration: underline; }
 
 img { border: 0; }
 
-.width-clip { max-width: 1050px; margin: 0 auto; padding: 0 8px; }
+.width-clip { padding: 0 8px; }
 .quiet { color: #888; }
 .clear { clear: both; }
 
@@ -58,8 +58,6 @@ img { border: 0; }
     padding-top: 4px;
 }
 #header-bottom-left {
-    max-width: 1050px;
-    margin: 0 auto;
     padding: 0 8px;
     position: relative;
     min-height: 40px;
@@ -147,8 +145,6 @@ img { border: 0; }
    Content + sidebar frame
    -------------------------------------------------------------------------- */
 #content {
-    max-width: 1050px;
-    margin: 0 auto;
     padding: 12px 8px 30px;
     position: relative;
 }
@@ -350,6 +346,13 @@ ul.flat-list.buttons li.first a { color: #888; }
 }
 .usertext-body.md p { margin: 0 0 10px 0; }
 .usertext-body.md p:last-child { margin-bottom: 0; }
+/* the OP self-text on a comments page sits in a faint bordered box, like reddit */
+.comments-page .thing.link .expando .usertext-body.md {
+    border: 1px solid #e6e6e6;
+    border-radius: 3px;
+    background: #fbfbfb;
+    padding: 6px 10px;
+}
 .usertext-body.md a { color: #369; text-decoration: underline; }
 .usertext-body.md ul, .usertext-body.md ol { margin: 0 0 10px 22px; }
 .usertext-body.md h1 { font-size: 18px; margin: 0 0 10px; }
@@ -399,8 +402,29 @@ ul.flat-list.buttons li.first a { color: #888; }
 .comment .tagline .score { color: #888; font-weight: normal; font-size: 11px; }
 .comment .tagline time { color: #888; }
 
+.comment .midcol-c {
+    float: left;
+    width: 15px;
+    margin: 0 4px 0 0;
+    padding-top: 1px;
+}
+.comment .midcol-c .arrow.up {
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-bottom: 8px solid #c4c4c4;
+    margin: 0 auto 3px;
+}
+.comment .midcol-c .arrow.down {
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 8px solid #c4c4c4;
+    margin: 1px auto 0;
+}
+.comment .midcol-c .arrow.up:hover { border-bottom-color: #ff4500; }
+.comment .midcol-c .arrow.down:hover { border-top-color: #5f99cf; }
+
 .comment .entry {
-    overflow: visible;
+    overflow: hidden;    /* sit beside the floated arrows */
     padding: 1px 0 2px 0;
 }
 .comment .usertext-body.md {
@@ -581,8 +605,7 @@ ul.flat-list.buttons li.first a { color: #888; }
    -------------------------------------------------------------------------- */
 #footer {
     clear: both;
-    max-width: 1050px;
-    margin: 20px auto 0;
+    margin: 20px 0 0;
     padding: 16px 8px 30px;
     border-top: 1px solid #e0e0e0;
     color: #888;

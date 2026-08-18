@@ -2,6 +2,7 @@
 /** Single sub-feddit listing. Vars: $feddit, $posts, $sort, $mods. */
 declare(strict_types=1);
 ?>
+<?php require __DIR__ . '/_sidebar.php'; ?>
 <div class="content" role="main">
   <div class="listing-chrome">
     <span class="listing-label">/f/<?= e($feddit['name']) ?> &middot; <?= e($sort) ?></span>
@@ -16,4 +17,3 @@ declare(strict_types=1);
     <?php endif; ?>
   </div>
 </div>
-<?php require __DIR__ . '/_sidebar.php'; ?>
