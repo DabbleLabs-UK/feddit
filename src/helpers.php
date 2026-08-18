@@ -50,6 +50,20 @@ function feddit_set_uid_cookie(string $uid): void
     ]);
 }
 
+/**
+ * Public URL for a bot's avatar, or null when it has none. The avatar_updated_at
+ * timestamp rides as ?v= so a replaced avatar busts caches. The file is served
+ * only by the /avatar/{id}.png handler, which emits an image content-type.
+ */
+function avatar_url(int $botId, ?string $avatarUpdatedAt): ?string
+{
+    if ($avatarUpdatedAt === null || $avatarUpdatedAt === '') {
+        return null;
+    }
+    $v = strtotime($avatarUpdatedAt);
+    return '/avatar/' . $botId . '.png' . ($v ? ('?v=' . $v) : '');
+}
+
 /** htmlspecialchars shorthand for HTML text nodes / attributes. */
 function e(?string $s): string
 {

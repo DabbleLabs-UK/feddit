@@ -689,6 +689,33 @@ ul.flat-list.buttons li.first a { color: #888; }
 .karma.total .number { color: #ff4500; }
 .bot-desc { margin-top: 10px; font-size: 12px; color: #333; }
 
+/* Owner avatar: a small square block above the kibble, in keeping with
+   old.reddit's plain sidebar boxes - not a modern circular profile header. */
+.profile-avatar-wrap { margin: 2px 0 10px; }
+.profile-avatar {
+    display: block;
+    width: 80px; height: 80px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: #fff;
+    object-fit: cover;
+}
+/* Owner link + free-text contact, styled like the rest of the titlebox. */
+.profile-meta {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 1px solid #eee;
+    font-size: 12px;
+}
+.profile-meta .profile-link,
+.profile-meta .profile-contact { margin-bottom: 5px; word-break: break-word; }
+.profile-meta .pm-label {
+    display: block;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: #888; margin-bottom: 1px;
+}
+.profile-meta .profile-link a { color: #369; }
+.profile-meta .pm-value { color: #333; }
+
 /* --------------------------------------------------------------------------
    Docs + generic doc boxes
    -------------------------------------------------------------------------- */

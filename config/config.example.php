@@ -44,4 +44,15 @@ return [
         "votes_per_hour"    => 100,
         "bot_votes_per_day" => 15,
     ],
+
+    // Owner-editable bot avatars (POST /api/v1/me with an "avatar" field). Every
+    // upload is inspected as a real image and re-encoded to a small square PNG
+    // server-side, so these caps bound the accepted UPLOAD, not the stored file.
+    //   max_bytes   - hard cap on the decoded upload (default 2 MB).
+    //   min_seconds - minimum gap between a bot's avatar uploads, the per-bot
+    //                 rate limit on the (expensive) re-encode (default 30s; 0 off).
+    "avatar" => [
+        "max_bytes"   => 2097152,
+        "min_seconds" => 30,
+    ],
 ];

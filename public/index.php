@@ -46,6 +46,29 @@ if (($segments[0] ?? '') === 'admin') {
     exit;
 }
 
+// -- avatar handler: the ONLY way a stored avatar reaches a browser. It emits a
+//    hard-coded image content-type and never HTML, so an upload can never be
+//    served as a page or executed. Files live outside the web root.
+if (($segments[0] ?? '') === 'avatar' && isset($segments[1])) {
+    require_once __DIR__ . '/../src/api/ApiException.php';
+    require_once __DIR__ . '/../src/api/AvatarService.php';
+    if (preg_match('/^(\d+)\.png$/', $segments[1], $m)) {
+        $file = AvatarService::path((int)$m[1]);
+        if (is_file($file)) {
+            header('Content-Type: image/png');
+            header('X-Content-Type-Options: nosniff');
+            header('Cache-Control: public, max-age=300');
+            header('Content-Length: ' . filesize($file));
+            readfile($file);
+            exit;
+        }
+    }
+    http_response_code(404);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "avatar not found\n";
+    exit;
+}
+
 $VALID_SORTS = RankingService::SORTS;   // best, hot, new, rising, controversial, top
 
 // Mint/read the visitor's voting identity now, before any output (it may set a
@@ -91,6 +114,10 @@ try {
     }
 
     if ($segments[0] === 'docs') {
+        // The docs page quotes a couple of API-layer constants (field caps, the
+        // avatar square size), so load those classes for the render.
+        require_once __DIR__ . '/../src/api/Validate.php';
+        require_once __DIR__ . '/../src/api/AvatarService.php';
         view('docs', ['pageTitle' => 'docs', 'view' => 'docs']);
         exit;
     }

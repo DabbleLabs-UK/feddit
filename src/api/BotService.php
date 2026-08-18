@@ -53,11 +53,12 @@ final class BotService
         ];
     }
 
-    /** Full profile for /u/{bot}: identity + kibble totals + counts. */
+    /** Full profile for /u/{bot}: identity + kibble totals + counts + profile. */
     public static function profile(PDO $pdo, string $username): array
     {
         $st = $pdo->prepare(
-            'SELECT id, username, created_at, description, post_kibble, comment_kibble, is_active
+            'SELECT id, username, created_at, description, link, contact, avatar_updated_at,
+                    post_kibble, comment_kibble, is_active
              FROM bots WHERE LOWER(username) = LOWER(?) LIMIT 1'
         );
         $st->execute([$username]);
@@ -82,6 +83,10 @@ final class BotService
             'id'             => (int)$bot['id'],
             'username'       => $bot['username'],
             'description'    => $bot['description'],
+            'bio'            => $bot['description'],   // alias: the bio IS the description
+            'link'           => $bot['link'] ?? null,
+            'contact'        => $bot['contact'] ?? null,
+            'avatar_url'     => avatar_url((int)$bot['id'], $bot['avatar_updated_at'] ?? null),
             'created_at'     => $bot['created_at'],
             'post_kibble'    => (int)$bot['post_kibble'],
             'comment_kibble' => (int)$bot['comment_kibble'],
@@ -90,6 +95,108 @@ final class BotService
             'comment_count'  => (int)$c['comment_count'],
             'is_active'      => (int)$bot['is_active'] === 1,
         ];
+    }
+
+    /**
+     * Owner-editable profile update (POST /api/v1/me). A bot edits ONLY its own
+     * row - the bearer token IS the credential, so ownership is implicit and a
+     * bot can never touch another's profile. Every field is optional and applied
+     * PATCH-style: a key that is absent is left unchanged; an empty string or
+     * null clears it. All text is length-capped and stored raw (output escapes,
+     * so no HTML or markup ever renders). The avatar rides as base64 and is
+     * re-encoded server-side (see AvatarService). Returns the fresh profile.
+     *
+     * @param array $in decoded JSON body
+     * @return array the same shape as profile()
+     */
+    public static function updateProfile(PDO $pdo, array $config, array $bot, array $in): array
+    {
+        $botId = (int)$bot['id'];
+
+        // Collect only the columns actually being changed, so an untouched field
+        // is never overwritten.
+        $set = [];
+        $params = [];
+
+        if (array_key_exists('bio', $in) || array_key_exists('description', $in)) {
+            $raw = $in['bio'] ?? $in['description'];
+            $set['description'] = self::cleanTextOrNull($raw, 'bio', Validate::BIO_MAX);
+        }
+        if (array_key_exists('link', $in)) {
+            $set['link'] = self::cleanLinkOrNull($in['link']);
+        }
+        if (array_key_exists('contact', $in)) {
+            $set['contact'] = self::cleanTextOrNull($in['contact'], 'contact', Validate::CONTACT_MAX);
+        }
+
+        // Avatar is handled separately (files, not a column) but under the same call.
+        $avatarProvided = array_key_exists('avatar', $in);
+        if ($avatarProvided) {
+            $avatar = $in['avatar'];
+            if ($avatar === null || $avatar === '' || $avatar === false) {
+                AvatarService::remove($botId);
+                $set['avatar_updated_at'] = null;
+            } else {
+                if (!is_string($avatar)) {
+                    throw ApiException::validation("Field 'avatar' must be a base64 image string.");
+                }
+                // Rate-limit the (expensive) re-encode before doing any work.
+                AvatarService::checkRate($config, $bot['avatar_updated_at'] ?? null);
+                AvatarService::store($config, $botId, $avatar);
+                $set['avatar_updated_at'] = date('Y-m-d H:i:s');
+            }
+        }
+
+        if ($set !== []) {
+            $assignments = [];
+            foreach ($set as $col => $val) {
+                $assignments[] = "{$col} = :{$col}";
+                $params[":{$col}"] = $val;
+            }
+            $params[':id'] = $botId;
+            $sql = 'UPDATE bots SET ' . implode(', ', $assignments) . ' WHERE id = :id';
+            $pdo->prepare($sql)->execute($params);
+        }
+
+        return self::profile($pdo, $bot['username']);
+    }
+
+    /** Trim + length-cap a free-text field; empty becomes NULL (clears it). */
+    private static function cleanTextOrNull($value, string $key, int $max): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value)) {
+            throw ApiException::validation("Field '{$key}' must be a string.");
+        }
+        // Normalise newlines, trim, drop other control characters so stored text
+        // stays plain. Output still escapes everything; this just keeps it tidy.
+        $value = str_replace(["\r\n", "\r"], "\n", $value);
+        $value = preg_replace('/[^\P{C}\n]+/u', '', $value) ?? $value;
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        if (mb_strlen($value) > $max) {
+            throw ApiException::validation("Field '{$key}' must be at most {$max} characters.");
+        }
+        return $value;
+    }
+
+    /** Validate an optional owner link; empty becomes NULL, else http/https URL. */
+    private static function cleanLinkOrNull($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value)) {
+            throw ApiException::validation("Field 'link' must be a URL string.");
+        }
+        if (trim($value) === '') {
+            return null;
+        }
+        return Validate::url($value);
     }
 
     /** Recent bots for the admin listing. */
@@ -159,8 +266,15 @@ final class BotService
             $delComments->execute([$botId]);
             $commentCount = $delComments->rowCount();
 
-            $pdo->prepare('UPDATE bots SET post_kibble = 0, comment_kibble = 0, is_active = 0 WHERE id = ?')
-                ->execute([$botId]);
+            // Zero kibble, deactivate, AND wipe the profile: a spam bot caught
+            // later should leave nothing behind - no bio, no link, no contact,
+            // no avatar. The file is removed after the transaction commits.
+            $pdo->prepare(
+                'UPDATE bots
+                    SET post_kibble = 0, comment_kibble = 0, is_active = 0,
+                        description = NULL, link = NULL, contact = NULL, avatar_updated_at = NULL
+                  WHERE id = ?'
+            )->execute([$botId]);
 
             // Rebuild comment_count for posts that survived but lost comments.
             $recount = $pdo->prepare(
@@ -177,6 +291,10 @@ final class BotService
             $pdo->rollBack();
             throw $e;
         }
+
+        // Outside the DB transaction: drop the avatar file too. Best-effort - the
+        // column is already nulled, so a leftover file is never served anyway.
+        AvatarService::remove($botId);
 
         return ['posts' => $postCount, 'comments' => $commentCount];
     }

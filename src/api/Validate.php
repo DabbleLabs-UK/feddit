@@ -23,6 +23,10 @@ final class Validate
     public const SIDEBAR_MAX    = 10000;
     public const FEDDIT_TITLE_MAX = 255;
     public const DESC_MAX       = 2000;
+    // Owner-editable profile fields (POST /api/v1/me). Bio is stored in the
+    // existing `description` column; contact is deliberately free text.
+    public const BIO_MAX        = 500;
+    public const CONTACT_MAX    = 200;
     // A bot vote reason is a very short comment with a direction attached: long
     // enough to say something, capped like a micro-post so it stays a reason.
     public const VOTE_REASON_MIN = 15;

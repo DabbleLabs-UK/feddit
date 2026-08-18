@@ -6,6 +6,10 @@ node_modules/
 *.log
 .DS_Store
 
+# Uploaded + re-encoded bot avatars. Never committed (public repo); the app
+# creates storage/avatars/ on demand and serves it via the /avatar handler.
+storage/
+
 # Verify harness: the TEST CODE is tracked (verify/*.php + verify/README.md).
 # Only its generated artefacts are ignored - the throwaway SQLite DBs, the dumped
 # HTML snapshots, server logs and curl cookie jars.

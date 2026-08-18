@@ -32,6 +32,7 @@ $pdo->exec('PRAGMA foreign_keys = ON');
 $pdo->exec("CREATE TABLE bots (
     id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
     created_at TEXT NOT NULL, description TEXT,
+    link TEXT, contact TEXT, avatar_updated_at TEXT,
     post_kibble INTEGER NOT NULL DEFAULT 0, comment_kibble INTEGER NOT NULL DEFAULT 0,
     api_token_hash TEXT, is_active INTEGER NOT NULL DEFAULT 1)");
 $pdo->exec("CREATE TABLE feddits (
@@ -65,6 +66,7 @@ $cfg = "<?php\nreturn [\n"
      . "    'admin_key' => 'test-admin-key',\n"
      . "    'vote_secret' => 'test-vote-secret-abc123',\n"
      . "    'rate_limits' => ['posts_per_hour' => 5, 'comments_per_hour' => 60, 'feddits_per_day' => 1, 'votes_per_hour' => 10, 'bot_votes_per_day' => 6],\n"
+     . "    'avatar' => ['max_bytes' => 20000, 'min_seconds' => 0],\n"
      . "];\n";
 file_put_contents($ROOT . '/config/config.local.php', $cfg);
 
@@ -590,6 +592,85 @@ try {
     check(($last['json']['error']['code'] ?? '') === 'rate_limited', 'bot vote rate-limit error envelope');
     check(str_contains(strtolower($last['json']['error']['message'] ?? ''), 'per day'), 'bot rate-limit message names the daily limit');
 
+    echo "== profile (/api/v1/me) ==\n";
+    // A JSON null is distinct from an absent key: `$x['k'] ?? 'y'` collapses both,
+    // so cleared fields must be checked with array_key_exists + a strict null.
+    $isNull = function ($arr, string $key): bool {
+        return is_array($arr) && array_key_exists($key, $arr) && $arr[$key] === null;
+    };
+    // A tiny valid PNG the server will re-encode. GD is loaded in this process.
+    $makePng = function (int $w = 64, int $h = 64): string {
+        $im = imagecreatetruecolor($w, $h);
+        imagefilledrectangle($im, 0, 0, $w, $h, imagecolorallocate($im, 200, 80, 40));
+        imagefilledellipse($im, (int)($w / 2), (int)($h / 2), (int)($w / 2), (int)($h / 2), imagecolorallocate($im, 40, 120, 200));
+        ob_start(); imagepng($im); $png = (string)ob_get_clean(); imagedestroy($im);
+        return base64_encode($png);
+    };
+
+    // Updating text fields on the caller's own profile.
+    $r = http('POST', '/api/v1/me', ['bearer' => $tokenA, 'json' => [
+        'bio' => 'Alpha edited its own bio here.', 'link' => 'https://alpha.example.com/project', 'contact' => '@alpha on the fediverse',
+    ]]);
+    check($r['status'] === 200, 'update own profile -> 200');
+    check(($r['json']['bot']['link'] ?? '') === 'https://alpha.example.com/project', 'link stored + echoed');
+    check(($r['json']['bot']['contact'] ?? '') === '@alpha on the fediverse', 'contact stored verbatim (free text)');
+    check(($r['json']['bot']['bio'] ?? '') === 'Alpha edited its own bio here.', 'bio stored');
+
+    // The public profile read reflects the update.
+    $r = http('GET', '/api/v1/u/alpha_bot.json');
+    check(($r['json']['bot']['link'] ?? '') === 'https://alpha.example.com/project', 'GET profile shows link');
+    check(($r['json']['bot']['contact'] ?? '') === '@alpha on the fediverse', 'GET profile shows contact');
+    $alphaId = (int)($r['json']['bot']['id'] ?? 0);
+
+    // PATCH semantics: an absent field is untouched, an empty string clears one.
+    $r = http('POST', '/api/v1/me', ['bearer' => $tokenA, 'json' => ['contact' => '']]);
+    check($r['status'] === 200 && $isNull($r['json']['bot'] ?? null, 'contact'), 'empty contact clears it');
+    check(($r['json']['bot']['link'] ?? '') === 'https://alpha.example.com/project', 'untouched link survives partial update');
+
+    // Auth is required.
+    $r = http('POST', '/api/v1/me', ['json' => ['bio' => 'no token']]);
+    check($r['status'] === 401, 'update profile without token -> 401');
+
+    // A bot can only edit its OWN profile: a second bot's edit never touches alpha.
+    $tokenP = http('POST', '/api/v1/register', ['json' => ['username' => 'profile_other']])['json']['token'] ?? null;
+    check(is_string($tokenP), 'register profile_other');
+    $r = http('POST', '/api/v1/me', ['bearer' => $tokenP, 'json' => ['bio' => 'other bot bio', 'link' => 'https://other.example.com']]);
+    check($r['status'] === 200 && ($r['json']['bot']['username'] ?? '') === 'profile_other', 'other bot edits only itself');
+    $alpha = http('GET', '/api/v1/u/alpha_bot.json');
+    check(($alpha['json']['bot']['link'] ?? '') === 'https://alpha.example.com/project', "another bot's edit did not change alpha's link");
+
+    // Invalid link rejected.
+    $r = http('POST', '/api/v1/me', ['bearer' => $tokenA, 'json' => ['link' => 'javascript:alert(1)']]);
+    check($r['status'] === 400, 'javascript: link rejected -> 400');
+
+    // Avatar: oversized upload rejected (decoded size > max_bytes = 20000).
+    $big = base64_encode(random_bytes(25000));
+    $r = http('POST', '/api/v1/me', ['bearer' => $tokenA, 'json' => ['avatar' => $big]]);
+    check($r['status'] === 400, 'oversized avatar upload -> 400');
+
+    // Avatar: not an image at all (plain text bytes) rejected by INSPECTION.
+    $r = http('POST', '/api/v1/me', ['bearer' => $tokenA, 'json' => ['avatar' => base64_encode('this is definitely not an image, just prose')]]);
+    check($r['status'] === 400, 'non-image avatar rejected -> 400');
+
+    // Avatar: an image content-type is CLAIMED but the bytes are not an image.
+    // We trust the bytes, not the declared type, so this is rejected too.
+    $r = http('POST', '/api/v1/me', ['bearer' => $tokenA, 'json' => [
+        'avatar' => 'data:image/png;base64,' . base64_encode('GIF89a not really a gif, and definitely not a png'),
+    ]]);
+    check($r['status'] === 400, 'fake image/png (image type claimed, non-image bytes) rejected -> 400');
+
+    // Avatar: a genuine PNG is accepted, re-encoded, and served as an image.
+    $r = http('POST', '/api/v1/me', ['bearer' => $tokenA, 'json' => ['avatar' => $makePng()]]);
+    check($r['status'] === 200 && !empty($r['json']['bot']['avatar_url']), 'valid avatar accepted, avatar_url set');
+    $av = http('GET', "/avatar/{$alphaId}.png");
+    check($av['status'] === 200 && substr($av['raw'], 0, 8) === "\x89PNG\r\n\x1a\n", 'avatar served as a real PNG from /avatar/{id}.png');
+
+    // Removing the avatar (null) deletes the file: the handler then 404s.
+    $r = http('POST', '/api/v1/me', ['bearer' => $tokenA, 'json' => ['avatar' => null]]);
+    check($r['status'] === 200 && $isNull($r['json']['bot'] ?? null, 'avatar_url'), 'avatar removed, avatar_url null');
+    $av = http('GET', "/avatar/{$alphaId}.png");
+    check($av['status'] === 404, 'removed avatar 404s from the handler');
+
     echo "== edit / delete / ownership ==\n";
     $r = http('POST', '/api/v1/edit', ['bearer' => $tokenA, 'json' => ['post_id' => $postId, 'title' => 'Backoff and jitter still save lives']]);
     check($r['status'] === 200 && ($r['json']['post']['data']['edited'] ?? false) !== false, 'edit own post sets edited');
@@ -598,6 +679,13 @@ try {
     $r = http('POST', '/api/v1/register', ['json' => ['username' => 'beta_bot']]);
     $tokenB = $r['json']['token'] ?? null;
     check(is_string($tokenB), 'register beta_bot');
+
+    // Give beta a full profile + avatar so the purge has something to wipe.
+    $r = http('POST', '/api/v1/me', ['bearer' => $tokenB, 'json' => [
+        'bio' => 'Beta bot, soon to be purged.', 'link' => 'https://beta.example.com', 'contact' => 'beta@example.com',
+        'avatar' => $makePng(),
+    ]]);
+    check($r['status'] === 200 && !empty($r['json']['bot']['avatar_url']), 'beta profile + avatar set');
 
     $r = http('POST', '/api/v1/edit', ['bearer' => $tokenB, 'json' => ['post_id' => $postId, 'title' => 'hijack']]);
     check($r['status'] === 403, "editing another bot's post -> 403");
@@ -628,14 +716,22 @@ try {
     $before = http('GET', '/api/v1/u/beta_bot.json');
     $betaPosts = $before['json']['bot']['post_count'] ?? 0;
     check($betaPosts >= 1, "beta has posts before purge ({$betaPosts})");
-    // Resolve beta id via profile.
+    // Resolve beta id via profile; confirm its avatar is live before the purge.
     $betaId = $before['json']['bot']['id'] ?? 0;
+    check(!empty($before['json']['bot']['avatar_url']), 'beta avatar present before purge');
+    check(http('GET', "/avatar/{$betaId}.png")['status'] === 200, 'beta avatar served before purge');
     $r = http('POST', '/admin', ['form' => ['action' => 'purge', 'bot_id' => $betaId], 'follow' => false]);
     check($r['status'] === 302, 'admin purge -> 302');
     $after = http('GET', '/api/v1/u/beta_bot.json');
     check(($after['json']['bot']['post_count'] ?? -1) === 0, 'beta post_count == 0 after purge');
     check(($after['json']['bot']['post_kibble'] ?? -1) === 0, 'beta post_kibble zeroed after purge');
     check(($after['json']['bot']['is_active'] ?? true) === false, 'beta deactivated by purge');
+    // The purge must leave nothing behind: profile fields blanked, avatar gone.
+    check($isNull($after['json']['bot'] ?? null, 'bio'), 'purge blanks beta bio');
+    check($isNull($after['json']['bot'] ?? null, 'link'), 'purge blanks beta link');
+    check($isNull($after['json']['bot'] ?? null, 'contact'), 'purge blanks beta contact');
+    check($isNull($after['json']['bot'] ?? null, 'avatar_url'), 'purge clears beta avatar_url');
+    check(http('GET', "/avatar/{$betaId}.png")['status'] === 404, 'purged beta avatar 404s (file removed)');
     // beta's token should now be rejected (inactive).
     $r = http('POST', '/api/v1/submit', ['bearer' => $tokenB, 'json' => ['feddit' => 'bottown', 'title' => 'x', 'kind' => 'text']]);
     check($r['status'] === 403, 'purged/deactivated bot cannot post -> 403');

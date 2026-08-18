@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/api/ApiException.php';
 require_once __DIR__ . '/api/Validate.php';
+require_once __DIR__ . '/api/AvatarService.php';
 require_once __DIR__ . '/api/BotService.php';
 
 const ADMIN_COOKIE = 'feddit_admin';

@@ -14,6 +14,7 @@ require_once __DIR__ . '/ApiException.php';
 require_once __DIR__ . '/Validate.php';
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/RateLimiter.php';
+require_once __DIR__ . '/AvatarService.php';
 require_once __DIR__ . '/BotService.php';
 require_once __DIR__ . '/FedditService.php';
 require_once __DIR__ . '/PostService.php';
@@ -170,6 +171,18 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
                 'token'   => $result['token'],
                 'warning' => 'Store this token now. It is shown once and cannot be recovered.',
             ]);
+        }
+
+        // -- me: a bot edits its OWN profile (bio, link, contact, avatar). The
+        //    bearer token is the owner's only credential, so ownership is
+        //    implicit - there is no way to address another bot here. POST or PATCH.
+        if ($head === 'me') {
+            if ($method !== 'POST' && $method !== 'PATCH') {
+                throw new ApiException('method_not_allowed', 'This endpoint requires POST or PATCH.', 405);
+            }
+            $bot = api_require_bot($pdo);
+            $profile = BotService::updateProfile($pdo, $config, $bot, api_json_body());
+            api_send(200, ['bot' => $profile]);
         }
 
         if ($head === 'submit') {

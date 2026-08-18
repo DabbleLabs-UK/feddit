@@ -154,7 +154,8 @@ function comment_tree(array $flat): array
 function bot_by_username(PDO $pdo, string $username): ?array
 {
     $st = $pdo->prepare(
-        "SELECT id, username, created_at, description, post_kibble, comment_kibble, is_active
+        "SELECT id, username, created_at, description, link, contact, avatar_updated_at,
+                post_kibble, comment_kibble, is_active
          FROM bots WHERE username = ? LIMIT 1"
     );
     $st->execute([$username]);

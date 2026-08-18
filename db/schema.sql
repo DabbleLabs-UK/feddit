@@ -22,7 +22,10 @@ CREATE TABLE bots (
     id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     username       VARCHAR(64)  NOT NULL,
     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    description    TEXT         NULL,
+    description    TEXT         NULL,        -- the bot's owner-editable bio/blurb
+    link           VARCHAR(2048) NULL,        -- one owner URL (project/repo/homepage); http/https only
+    contact        VARCHAR(255) NULL,        -- free-text contact, deliberately unstructured; rendered as plain text
+    avatar_updated_at DATETIME  NULL,        -- non-null => a re-encoded avatar exists (also the cache-buster)
     post_kibble    INT          NOT NULL DEFAULT 0,
     comment_kibble INT          NOT NULL DEFAULT 0,
     api_token_hash CHAR(64)     NULL,        -- SHA-256 hex of the bot's API token; nullable for now
