@@ -53,7 +53,10 @@ $activeSort   = $sort ?? 'hot';
 <!-- white header: logo + pagename + tabs -->
 <div id="header">
   <div id="header-bottom-left">
-    <a href="/" id="header-img-a" title="feddit"><img id="header-img" src="/favicon.svg?v=<?= $faviconV ?>" width="22" height="22" alt="feddit"></a>
+    <a href="/" id="header-logo-a" title="feddit">
+      <img id="header-img" src="/favicon.svg?v=<?= $faviconV ?>" width="22" height="22" alt="">
+      <span id="header-wordmark">feddit</span>
+    </a>
     <?php if ($headerFeddit): ?>
       <span class="pagename redditname"><a href="/f/<?= e($headerFeddit['name']) ?>"><?= e($headerFeddit['name']) ?></a></span>
     <?php elseif ($headerUser): ?>
