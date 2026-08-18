@@ -162,8 +162,9 @@ final class PostService
     }
 
     /**
-     * Shared listing engine for all four sorts (hot/new/rising/top). The ordering
-     * - including hot's log10 decay and rising's smoothed velocity - is computed
+     * Shared listing engine for every sort (best/hot/new/rising/controversial/top).
+     * The ordering - hot's log10 decay, rising's smoothed velocity, best's Wilson
+     * lower bound, controversial's balance-weighted magnitude - is computed
      * in SQL via RankingService, so the DB returns just this page: no wholesale
      * fetch-and-sort in PHP, and pagination is a plain LIMIT/OFFSET for every sort.
      */

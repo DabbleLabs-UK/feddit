@@ -2,8 +2,9 @@
 declare(strict_types=1);
 
 /**
- * Ranking acceptance test. Proves the four sorts (hot / new / rising / top) on a
- * throwaway SQLite DB, driving the REAL ordering code in src/api/RankingService.php
+ * Ranking acceptance test. Proves all six sorts (best / hot / new / rising /
+ * controversial / top) on a throwaway SQLite DB, driving the REAL ordering code
+ * in src/api/RankingService.php
  * (the same code the website and JSON API use - registerSqliteFunctions() shims the
  * MariaDB-only SQL functions so one query string runs on SQLite here).
  *
@@ -66,6 +67,45 @@ foreach ($busy as [$l,$h,$s]) { $ins->execute([2, $l, ago($h), $s]); }
 // A soft-deleted high-score post: must never appear in any sort.
 $pdo->prepare("INSERT INTO posts (feddit_id,title,created_at,score,is_deleted) VALUES (1,'DELETED',?,999,1)")
     ->execute([ago(1)]);
+
+// -- votes: the table best + controversial derive genuine ups/downs from -------
+// Only the columns the ranking subquery reads. best/controversial reconcile the
+// stored score with real vote ROWS: downs = count of direction=-1 rows, and
+// ups = score + downs (so ups - downs == score, always). The tiny/busy subs have
+// NO vote rows (like seeded content) - downs = 0 there, which is deliberate: it
+// is why controversial is empty for them and why best collapses toward top.
+$pdo->exec("CREATE TABLE votes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, target_type TEXT NOT NULL,
+    target_id INTEGER NOT NULL, bot_id INTEGER NULL, direction INTEGER NOT NULL)");
+
+// feddit 3 = a sub built specifically to exercise best + controversial. Each post
+// carries an explicit score AND a chosen number of real DOWNVOTE rows; upvote
+// rows are irrelevant to the ranking (ups is derived as score+downs), so we only
+// seed downs. One post (VOTED) is realised the "honest" way - genuine up AND down
+// rows that sum to its score - to prove ups then equals the true upvote count.
+// (label, score, downRows)
+$vote = [
+    ['EVEN_BIG',   2,  8],   // ups 10 / downs 8  - heavily voted, near-even -> controversial
+    ['EVEN_SMALL', 1,  4],   // ups  5 / downs 4  - near-even but smaller magnitude
+    ['LOPSIDED',  20,  2],   // ups 22 / downs 2  - high score, few downs -> best-ish, not controversial-ish
+    ['NODOWNS',   15,  0],   // ups 15 / downs 0  - pure upvotes -> in best, OUT of controversial
+    ['ALLDOWN',   -3,  3],   // ups  0 / downs 3  - pile-on -> OUT of controversial, best sinks it
+    ['ZEROVOTE',   8,  0],   // no rows at all    - like seeded content
+    ['EVENEST',    0,  6],   // ups  6 / downs 6  - perfectly even -> most controversial
+];
+$insV = $pdo->prepare("INSERT INTO posts (feddit_id,title,created_at,score,is_deleted) VALUES (3,?,?,?,0)");
+$insVote = $pdo->prepare("INSERT INTO votes (target_type,target_id,direction) VALUES ('post',?,?)");
+foreach ($vote as $i => [$l, $s, $dn]) {
+    $insV->execute([$l, ago(3 + $i), $s]);           // ages 3h.. so top ties break predictably
+    $pid = (int)$pdo->lastInsertId();
+    for ($k = 0; $k < $dn; $k++) { $insVote->execute([$pid, -1]); }
+}
+// VOTED: score 5 realised honestly as 6 up + 1 down rows (net +5). downs (rows) = 1,
+// so ups = score + downs = 6 = the real upvote count. Proves the exact path.
+$insV->execute(['VOTED', ago(3), 5]);
+$votedId = (int)$pdo->lastInsertId();
+for ($k = 0; $k < 6; $k++) { $insVote->execute([$votedId, 1]); }
+$insVote->execute([$votedId, -1]);
 
 /** Run a sort through the real RankingService clause and return ordered labels. */
 function ranked(PDO $pdo, string $sort, int $fedditId, int $limit = 100): array
@@ -174,6 +214,100 @@ check(!in_array('C', $rising, true) && !in_array('E', $rising, true), 'rising ex
 $risingOk = true;
 foreach ($rising as $l) { if (age_h($pdo, $l) > 24 || score_of($pdo, $l) < 3) { $risingOk = false; } }
 check($risingOk, 'every rising post is <=24h old and score>=3');
+
+// -- best + controversial: genuine ups/downs, reconciled with the score --------
+//
+// The reconciliation (see RankingService docblock): downs = real downvote ROWS,
+// ups = score + downs, so ups - downs == score for every post - the score, the
+// hover tooltip's down count, and these sorts can never disagree. The PHP
+// references below mirror the SQL byte-for-byte, exactly as hot_score() does for
+// hot, so a drift in either engine's expression fails the test.
+
+/** Reconciled (ups, downs) for a votesub post, mirroring the SQL derivation. */
+function ups_downs(PDO $pdo, string $label): array
+{
+    $st = $pdo->prepare("SELECT p.score,
+        (SELECT COUNT(*) FROM votes vd
+           WHERE vd.target_type = 'post' AND vd.target_id = p.id AND vd.direction = -1) AS downs
+        FROM posts p WHERE p.title = ? LIMIT 1");
+    $st->execute([$label]);
+    $r = $st->fetch();
+    $downs = (int)$r['downs'];
+    return [(int)$r['score'] + $downs, $downs];   // [ups, downs]
+}
+/** PHP reference for reddit's 'best': the Wilson score interval lower bound. */
+function wilson_lb(int $ups, int $downs): float
+{
+    $n = $ups + $downs;
+    if ($n <= 0) { return 0.0; }
+    $z = 1.281551565545; $z2 = $z * $z;
+    $p = $ups / $n;
+    $left  = $p + $z2 / (2 * $n);
+    $right = $z * sqrt(($p * (1 - $p) + $z2 / (4 * $n)) / $n);
+    return ($left - $right) / (1 + $z2 / $n);
+}
+/** PHP reference for reddit's 'controversial': magnitude ** balance. */
+function controversy(int $ups, int $downs): float
+{
+    if ($downs <= 0 || $ups <= 0) { return 0.0; }
+    $mag = $ups + $downs;
+    $bal = $ups > $downs ? $downs / $ups : $ups / $downs;
+    return $mag ** $bal;
+}
+
+$vlabels = ['EVEN_BIG','EVEN_SMALL','LOPSIDED','NODOWNS','ALLDOWN','ZEROVOTE','EVENEST','VOTED'];
+
+echo "\n== reconciliation invariant: ups - downs == score (tooltip never contradicted) ==\n";
+$invOk = true;
+foreach ($vlabels as $l) {
+    [$u, $d] = ups_downs($pdo, $l);
+    if ($u - $d !== score_of($pdo, $l)) { $invOk = false; }
+}
+check($invOk, 'every post satisfies ups - downs == score (score/tooltip/sorts agree)');
+[$vu, $vd] = ups_downs($pdo, 'VOTED');
+check($vu === 6 && $vd === 1, 'VOTED: real up+down rows sum to score, so ups (6) == true upvote count, downs == 1');
+
+echo "\n== best: Wilson lower bound, SQL matches the PHP reference ==\n";
+$best3 = ranked($pdo, 'best', 3);
+report($pdo, 'best', $best3);
+$refBest = $vlabels;
+usort($refBest, function ($x, $y) use ($pdo) {
+    [$ux, $dx] = ups_downs($pdo, $x); [$uy, $dy] = ups_downs($pdo, $y);
+    return wilson_lb($uy, $dy) <=> wilson_lb($ux, $dx);   // all distinct here
+});
+check($best3 === $refBest, 'best order == PHP wilson_lb() order');
+check(end($best3) === 'ALLDOWN', 'best sinks the all-downvote pile-on to the very bottom (Wilson 0)');
+// Confidence, not raw ratio: a spotless 8/0 (ZEROVOTE) outranks a heavily-voted
+// 22/2 (LOPSIDED) whose two downvotes dent the lower bound.
+check(array_search('ZEROVOTE', $best3, true) < array_search('LOPSIDED', $best3, true),
+    'best ranks a spotless small record above a larger record with a couple of downs');
+
+echo "\n== controversial: magnitude ** balance, contested-only and honestly sparse ==\n";
+$contro3 = ranked($pdo, 'controversial', 3);
+report($pdo, 'controversial', $contro3);
+$refContro = array_values(array_filter($vlabels, function ($l) use ($pdo) {
+    [$u, $d] = ups_downs($pdo, $l); return controversy($u, $d) > 0;
+}));
+usort($refContro, function ($x, $y) use ($pdo) {
+    [$ux, $dx] = ups_downs($pdo, $x); [$uy, $dy] = ups_downs($pdo, $y);
+    return controversy($uy, $dy) <=> controversy($ux, $dx);
+});
+check($contro3 === $refContro, 'controversial order == PHP controversy() order (contested posts only)');
+check($contro3[0] === 'EVENEST', 'the perfectly-even, well-voted post is the most controversial');
+check(!in_array('NODOWNS', $contro3, true), 'controversial excludes the zero-downvote post (NODOWNS)');
+check(!in_array('ZEROVOTE', $contro3, true), 'controversial excludes the zero-vote post (ZEROVOTE)');
+check(!in_array('ALLDOWN', $contro3, true), 'controversial excludes the all-downvote pile-on (ALLDOWN, ups<=0)');
+
+echo "\n== degenerate cases: no real downvotes -> controversial is honestly empty ==\n";
+// The tiny + busy subs have NO vote rows (like seeded content): downs = 0 for
+// every post, so controversial has nothing contested to show. This is correct,
+// not a bug - the empty state says so.
+check(ranked($pdo, 'controversial', 1) === [], 'controversial on the tiny (all-upvote) sub is empty');
+check(ranked($pdo, 'controversial', 2) === [], 'controversial on the busy (no-vote-rows) sub is empty');
+// And with no downvotes anywhere, best has no confidence signal to act on, so it
+// collapses to top's ordering - best and top are only distinct once downs exist.
+check(ranked($pdo, 'best', 1) === ranked($pdo, 'top', 1),
+    'best collapses to top ordering when there are no downvotes (tiny sub)');
 
 echo "\n============================\n";
 echo "PASS: {$PASS}   FAIL: {$FAIL}\n";

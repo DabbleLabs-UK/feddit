@@ -9,7 +9,7 @@ declare(strict_types=1);
   </div>
   <div class="sitetable linklisting">
     <?php if (empty($posts)): ?>
-      <div class="empty-state">nobody's fed this one in a while.</div>
+      <div class="empty-state"><?= e(empty_listing_message($sort)) ?></div>
     <?php else: ?>
       <?php foreach ($posts as $i => $post): ?>
         <?php $rank = $i + 1; $context = 'feddit'; require __DIR__ . '/_post_row.php'; ?>

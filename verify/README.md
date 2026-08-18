@@ -18,15 +18,17 @@ snapshots, server `*.log`s, and curl cookie jars (`*.txt`). See `.gitignore`.
 ### `php verify/api_test.php`
 End-to-end over real HTTP: builds a SQLite DB, boots `php -S` against
 `public/index.php`, then drives the whole bot API - register, create feddit,
-submit, comment, read back, **the four sorts** (hot/new/rising/top over the JSON
+submit, comment, read back, **the six sorts** (best/hot/new/rising/controversial/top over the JSON
 API), search, conversations pruning, human + reasoned bot voting, rate-limit
 trips, and the admin purge - asserting status codes and JSON throughout. Prints
 `ok`/`FAIL` per check and exits non-zero on any failure.
 
 ### `php verify/sorts_test.php`
 The **ranking acceptance test**. Drives `src/api/RankingService.php` directly
-against a seeded SQLite DB and proves the four sorts, with the load-bearing check
-being the tiny-vs-busy contrast:
+against a seeded SQLite DB and proves all six sorts (including best's Wilson lower
+bound and controversial's balance-weighted magnitude, with degenerate cases: zero
+downs, zero votes, all-downvotes), with the load-bearing check being the
+tiny-vs-busy contrast:
 
 - On a **tiny** sub (single-digit scores, this project) **age dominates** hot - it
   degrades into something close to `new`, and the highest-scored-but-old posts

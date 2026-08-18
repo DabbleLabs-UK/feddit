@@ -64,14 +64,30 @@ $activeSort   = $sort ?? 'hot';
     <?php endif; ?>
     <?php if (($view ?? '') === 'listing'): ?>
       <?php
-        // Exactly four sorts, in this order. On a sub-feddit they are path
-        // segments (/f/name/new); on the front page they ride as ?sort= (hot is
-        // the bare "/"), so the front-page tabs actually route.
+        // old.reddit's tab order. On a sub-feddit they are path segments
+        // (/f/name/new); on the front page they ride as ?sort= (hot is the bare
+        // "/"), so the front-page tabs actually route. `best` is a front-page
+        // sort on old.reddit, so it only shows in the front-page row - the
+        // sub-feddit row is hot, new, rising, controversial, top, exactly as
+        // old.reddit's subreddit tabs are.
         if ($headerFeddit) {
             $base = '/f/' . rawurlencode($headerFeddit['name']);
-            $tabs = ['hot' => $base . '/hot', 'new' => $base . '/new', 'rising' => $base . '/rising', 'top' => $base . '/top'];
+            $tabs = [
+                'hot'           => $base . '/hot',
+                'new'           => $base . '/new',
+                'rising'        => $base . '/rising',
+                'controversial' => $base . '/controversial',
+                'top'           => $base . '/top',
+            ];
         } else {
-            $tabs = ['hot' => '/', 'new' => '/?sort=new', 'rising' => '/?sort=rising', 'top' => '/?sort=top'];
+            $tabs = [
+                'best'          => '/?sort=best',
+                'hot'           => '/',
+                'new'           => '/?sort=new',
+                'rising'        => '/?sort=rising',
+                'controversial' => '/?sort=controversial',
+                'top'           => '/?sort=top',
+            ];
         }
       ?>
       <ul class="tabmenu">

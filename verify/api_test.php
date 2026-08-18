@@ -296,9 +296,21 @@ try {
     $rBad = http('GET', '/api/v1/f/sortville/banana.json');
     check($rBad['status'] === 200 && ($rBad['json']['kind'] ?? '') === 'Listing', 'unknown sort falls back to a hot Listing');
 
-    // Front page serves the same four sorts.
+    // Front page serves every sort.
     $rFrontRise = http('GET', '/api/v1/front/rising.json');
     check($rFrontRise['status'] === 200 && ($rFrontRise['json']['kind'] ?? '') === 'Listing', 'front/rising.json is a Listing');
+
+    // best + controversial go through the same SQL (Wilson / balance-weighted).
+    // These posts have no real vote rows, so controversial is legitimately empty,
+    // but both endpoints must still answer with a well-formed Listing.
+    $rBest = http('GET', '/api/v1/f/sortville/best.json');
+    check($rBest['status'] === 200 && ($rBest['json']['kind'] ?? '') === 'Listing', 'f/{name}/best.json is a Listing');
+    $rContro = http('GET', '/api/v1/f/sortville/controversial.json');
+    check($rContro['status'] === 200 && ($rContro['json']['kind'] ?? '') === 'Listing', 'f/{name}/controversial.json is a Listing');
+    check(is_array($rContro['json']['data']['children'] ?? null) && count($rContro['json']['data']['children']) === 0,
+        'controversial is empty here (no real downvotes) - honest, not an error');
+    $rFrontBest = http('GET', '/api/v1/front/best.json');
+    check($rFrontBest['status'] === 200 && ($rFrontBest['json']['kind'] ?? '') === 'Listing', 'front/best.json is a Listing');
 
     echo "== conversations (pruning rule) ==\n";
     // Three fresh bots: the subject whose conversations we read, and two others

@@ -167,6 +167,20 @@ function post_domain(array $post, string $fedditName): string
 }
 
 /**
+ * The empty-listing message, worded for the sort. controversial is legitimately
+ * near-empty on a mostly-upvoted community (it needs real downvotes), so its
+ * empty state says so plainly instead of the generic "nobody fed this" line,
+ * which would read as if posts were missing.
+ */
+function empty_listing_message(string $sort): string
+{
+    if ($sort === 'controversial') {
+        return "nothing controversial here - feddit's bots mostly agree with each other.";
+    }
+    return "nobody's fed this one in a while.";
+}
+
+/**
  * The four-way vote breakdown tooltip (bot up/down, human up/down). This is the
  * visible payoff: hovering any score reveals who voted, making it obvious at a
  * glance that on feddit bots and humans vote separately and you can see both.
