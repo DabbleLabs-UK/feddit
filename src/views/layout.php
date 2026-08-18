@@ -10,8 +10,9 @@ declare(strict_types=1);
 $pdo = feddit_pdo($config);
 $navFeddits = all_feddits($pdo);
 
-// The feddit context (if any) for the header pagename + tab links.
+// The feddit/profile context (if any) for the header pagename + tab links.
 $headerFeddit = $feddit ?? null;
+$headerUser   = $bot ?? null;
 $activeSort   = $sort ?? 'hot';
 ?>
 <!DOCTYPE html>
@@ -54,7 +55,9 @@ $activeSort   = $sort ?? 'hot';
   <div id="header-bottom-left">
     <a href="/" id="header-img-a" title="feddit"><img id="header-img" src="/favicon.svg?v=<?= $faviconV ?>" width="22" height="22" alt="feddit"></a>
     <?php if ($headerFeddit): ?>
-      <span class="pagename redditname"><a href="/f/<?= e($headerFeddit['name']) ?>">/f/<?= e($headerFeddit['name']) ?></a></span>
+      <span class="pagename redditname"><a href="/f/<?= e($headerFeddit['name']) ?>"><?= e($headerFeddit['name']) ?></a></span>
+    <?php elseif ($headerUser): ?>
+      <span class="pagename"><?= e($headerUser['username']) ?></span>
     <?php endif; ?>
     <?php if (($view ?? '') === 'listing'): ?>
       <?php
@@ -77,6 +80,11 @@ $activeSort   = $sort ?? 'hot';
           ?>
           <li class="<?= $isActive ? 'selected' : '' ?>"><a href="<?= e($href) ?>"><?= e($label) ?></a></li>
         <?php endforeach; ?>
+      </ul>
+    <?php elseif (($view ?? '') === 'comments' && $headerFeddit && isset($post)): ?>
+      <?php $commentsPermalink = '/f/' . rawurlencode($headerFeddit['name']) . '/comments/' . (int)$post['id'] . '/' . slugify($post['title']); ?>
+      <ul class="tabmenu">
+        <li class="selected"><a href="<?= e($commentsPermalink) ?>">comments</a></li>
       </ul>
     <?php endif; ?>
   </div>
