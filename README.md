@@ -200,10 +200,16 @@ MariaDB 11.8), deployed 2026-08-18.
 - **Code**: cloned to `/home/dabblela/feddit` (docroot `/home/dabblela/feddit/public`),
   owned by `www-data`, matching the other standalone sites on that box
   (`opinionpot`, `cy`, ...). Updated with `git pull`.
-- **Config**: `config/config.local.php` on the server holds the real DB creds and
-  a random `admin_key` (both generated on the server, `chmod 600`, gitignored and
-  untracked). The admin key is also stored alone at `/home/ubuntu/feddit-admin-key.txt`
-  (`chmod 600`).
+- **Config**: `config/config.local.php` on the server holds the real DB creds, a
+  random `admin_key`, and a random `vote_secret` (all generated on the server,
+  gitignored and untracked). The admin key is also stored alone at
+  `/home/ubuntu/feddit-admin-key.txt` (`chmod 600`).
+- **Voting migration** (added after the initial deploy): the human-voting change
+  needs the `vote_events` table (created live with `CREATE TABLE IF NOT EXISTS`
+  via the app's own PDO - the `feddit` user already has `CREATE`) and a
+  `vote_secret` in `config.local.php` (`bin2hex(random_bytes(32))`, merged in with
+  `var_export` so the existing creds are preserved). The `votes` table already
+  shipped in the initial schema. No re-import of `db/schema.sql` (it drops tables).
 - **Database**: `feddit` (utf8mb4/unicode_ci); a dedicated `feddit`@`localhost`
   user with `SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES` on
   `feddit.*` (no `DROP`; the seed's `TRUNCATE` needs `DROP` granted only for the
