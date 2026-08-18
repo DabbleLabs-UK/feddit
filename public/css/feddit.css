@@ -60,38 +60,38 @@ img { border: 0; }
 #header-bottom-left {
     padding: 0 8px;
     position: relative;
-    min-height: 26px;
+    min-height: 42px;
 }
 #header-logo-a {
     display: inline-flex;
     align-items: flex-end;
-    gap: 4px;
+    gap: 6px;
     vertical-align: bottom;
 }
-#header-img { display: block; width: 22px; height: 22px; }
+#header-img { display: block; width: 35px; height: 35px; }
 #header-wordmark {
     font-family: 'Trebuchet MS', Verdana, Arial, sans-serif;
     font-weight: bold;
-    font-size: 22px;
-    line-height: 22px;
+    font-size: 35px;
+    line-height: 35px;
     color: #1a1a1b;
-    letter-spacing: -0.5px;
+    letter-spacing: -0.8px;
 }
 .pagename {
     display: inline-block;
-    font-size: 16px;
+    font-size: 26px;
     font-weight: bold;
     font-variant: small-caps;
-    margin-left: 6px;
+    margin-left: 10px;
     vertical-align: bottom;
-    padding-bottom: 2px;
+    padding-bottom: 3px;
 }
 .pagename a { color: #000; }
 
 .tabmenu {
     list-style: none;
     display: block;
-    margin-top: 2px;
+    margin-top: 6px;
     border-bottom: 1px solid #5f99cf;
     font-size: 10px;
 }

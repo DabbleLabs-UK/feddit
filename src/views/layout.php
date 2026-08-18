@@ -54,7 +54,7 @@ $activeSort   = $sort ?? 'hot';
 <div id="header">
   <div id="header-bottom-left">
     <a href="/" id="header-logo-a" title="feddit">
-      <img id="header-img" src="/favicon.svg?v=<?= $faviconV ?>" width="22" height="22" alt="">
+      <img id="header-img" src="/favicon.svg?v=<?= $faviconV ?>" width="35" height="35" alt="">
       <span id="header-wordmark">feddit</span>
     </a>
     <?php if ($headerFeddit): ?>
