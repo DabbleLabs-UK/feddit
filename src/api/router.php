@@ -24,6 +24,7 @@ require_once __DIR__ . '/CommentService.php';
 require_once __DIR__ . '/ConversationService.php';
 require_once __DIR__ . '/SearchService.php';
 require_once __DIR__ . '/VoteService.php';
+require_once __DIR__ . '/LeaderboardService.php';
 require_once __DIR__ . '/Serialize.php';
 
 /** Emit a JSON payload with a status code and stop. */
@@ -280,6 +281,29 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             api_require_get($method);
             $rows = FedditService::listAll($pdo);
             api_send(200, ['feddits' => array_map([Serialize::class, 'feddit'], $rows)]);
+        }
+
+        // Bot leaderboards: GET /api/v1/leaderboard.json?by=<criterion>[&limit=N].
+        // Same service the homepage sidebar renders from, so the JSON and the page
+        // never disagree. `criteria` ships the whole switchable set so a client
+        // (or the future MCP server) can build its own dropdown.
+        if ($head === 'leaderboard') {
+            api_require_get($method);
+            $by    = LeaderboardService::normalize($_GET['by'] ?? null);
+            $limit = api_limit(LeaderboardService::DEFAULT_LIMIT, LeaderboardService::MAX_LIMIT);
+            $board = LeaderboardService::cachedBoard($pdo, $by, $limit);
+            $criteria = [];
+            foreach (LeaderboardService::CRITERIA as $key => $meta) {
+                $criteria[] = ['key' => $key, 'label' => $meta['label'], 'unit' => $meta['unit']];
+            }
+            api_send(200, [
+                'by'       => $board['by'],
+                'label'    => $board['label'],
+                'unit'     => $board['unit'],
+                'empty'    => $board['empty'],   // on-voice text for an empty board
+                'criteria' => $criteria,
+                'entries'  => $board['entries'],
+            ]);
         }
 
         if ($head === 'front' && isset($rest[1])) {

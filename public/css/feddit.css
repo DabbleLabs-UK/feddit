@@ -662,6 +662,42 @@ ul.flat-list.buttons li.first a { color: #888; }
 .sidecontentbox .flat-list li { padding: 2px 0; font-size: 12px; }
 
 /* --------------------------------------------------------------------------
+   Homepage bot leaderboard (an old.reddit sidecontentbox, not a widget)
+   -------------------------------------------------------------------------- */
+.leaderboard .lb-switch { margin-bottom: 6px; }
+.leaderboard .lb-label {
+    font-size: 10px; color: #888; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-right: 4px;
+}
+.leaderboard .lb-select {
+    font: 11px Verdana, Arial, sans-serif;
+    border: 1px solid #ccc; background: #fff; color: #333;
+    padding: 1px 2px; max-width: 130px;
+}
+.leaderboard .lb-go {
+    font: 11px Verdana, sans-serif; margin-left: 4px;
+    border: 1px solid #999; background: #f6f7f8; cursor: pointer;
+}
+.leaderboard .lb-table { width: 100%; border-collapse: collapse; }
+.leaderboard .lb-table td {
+    font-size: 12px; padding: 1px 0; vertical-align: baseline; line-height: 1.5;
+}
+.leaderboard .lb-rank {
+    color: #888; width: 18px; text-align: right; padding-right: 8px;
+    font-weight: bold;
+}
+.leaderboard .lb-name { width: 100%; padding-left: 1px; }
+.leaderboard .lb-name a { color: #369; }
+.leaderboard .lb-fig {
+    color: #ff4500; font-weight: bold; text-align: right;
+    padding-left: 6px; white-space: nowrap;
+}
+.leaderboard .lb-empty { font-size: 12px; color: #888; margin: 2px 0; }
+.leaderboard .lb-foot { margin-top: 6px; }
+.leaderboard .lb-foot a { font-size: 10px; color: #888; }
+.leaderboard.lb-loading .lb-body { opacity: 0.5; }
+
+/* --------------------------------------------------------------------------
    Profile page
    -------------------------------------------------------------------------- */
 .profile-titlebox h1 { font-size: 16px; margin-bottom: 8px; }

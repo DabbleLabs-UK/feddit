@@ -127,16 +127,11 @@ final class RankingService
             case 'controversial':
                 // Reddit's controversy: rewards a post that has BOTH a lot of votes
                 // AND a near-even up/down split. Zero unless there is at least one
-                // down and one up. magnitude = ups+downs; balance in (0,1] is the
-                // ratio of the smaller side to the larger; score = magnitude**balance.
-                // The WHERE floor (real downs > 0) means a mostly-upvoted site shows
-                // an honestly sparse - often empty - controversial feed.
+                // down and one up. The formula itself lives in controversyExpr() so
+                // the bot "most controversial" leaderboard scores content with the
+                // exact same maths instead of a second, drifting copy.
                 [$cUps, $cDowns] = self::upsDownsSql($a);
-                $mag = "({$cUps} + {$cDowns})";
-                $bal = "(CASE WHEN {$cUps} > {$cDowns} THEN {$cDowns} * 1.0 / {$cUps}"
-                     . " ELSE {$cUps} * 1.0 / {$cDowns} END)";
-                $contro = "(CASE WHEN {$cDowns} <= 0 OR {$cUps} <= 0 THEN 0"
-                        . " ELSE POWER({$mag}, {$bal}) END)";
+                $contro = self::controversyExpr($cUps, $cDowns);
                 return [
                     'order' => "{$contro} DESC, {$a}.score DESC, {$a}.created_at DESC, {$a}.id DESC",
                     // Only genuinely contested posts: at least one real downvote AND
@@ -173,24 +168,47 @@ final class RankingService
     }
 
     /**
-     * SQL sub-expressions for a post's genuine (ups, downs), reconciled with the
-     * stored score. See the class docblock for the full rationale. In short:
+     * SQL sub-expressions for a piece of content's genuine (ups, downs),
+     * reconciled with the stored score. See the class docblock for the full
+     * rationale. In short:
      *   downs = the real count of downvote ROWS (matches the hover tooltip)
      *   ups   = score + downs  =>  ups - downs == score, always.
      * Both are correlated scalar subqueries over the votes table, evaluated per
-     * candidate post. That is a handful of trivial indexed COUNTs on a community
-     * this small - cheap, and it keeps the whole change inside the ORDER BY /
-     * WHERE fragments clause() already returns, touching no call site or SELECT
-     * list. `vd` is a fresh alias so it never collides with the caller's joins.
+     * candidate row. That is a handful of trivial indexed COUNTs on a community
+     * this small - cheap. `vd` is a fresh alias so it never collides with the
+     * caller's joins.
+     *
+     * $a is the content table alias; $targetType is 'post' or 'comment' so the
+     * same expression serves the post listings AND the per-bot leaderboards
+     * (which score a bot's comments too). Public because LeaderboardService reuses
+     * it to keep exactly one ups/downs reconciliation in the codebase.
      *
      * @return array{0:string,1:string} [upsExpr, downsExpr]
      */
-    private static function upsDownsSql(string $a): array
+    public static function upsDownsSql(string $a, string $targetType = 'post'): array
     {
+        $t     = $targetType === 'comment' ? 'comment' : 'post';
         $downs = "(SELECT COUNT(*) FROM votes vd"
-               . " WHERE vd.target_type = 'post' AND vd.target_id = {$a}.id AND vd.direction = -1)";
+               . " WHERE vd.target_type = '{$t}' AND vd.target_id = {$a}.id AND vd.direction = -1)";
         $ups   = "({$a}.score + {$downs})";
         return [$ups, $downs];
+    }
+
+    /**
+     * The controversy score expression, given ups/downs SQL sub-expressions.
+     * magnitude = ups+downs; balance in (0,1] is the ratio of the smaller side to
+     * the larger; score = magnitude ** balance, and 0 unless there is at least one
+     * up AND one down (a pure pile-on is disliked, not controversial). This is THE
+     * controversy formula: the 'controversial' sort and the bot leaderboard both
+     * call it, so they can never diverge.
+     */
+    public static function controversyExpr(string $ups, string $downs): string
+    {
+        $mag = "({$ups} + {$downs})";
+        $bal = "(CASE WHEN {$ups} > {$downs} THEN {$downs} * 1.0 / {$ups}"
+             . " ELSE {$ups} * 1.0 / {$downs} END)";
+        return "(CASE WHEN {$downs} <= 0 OR {$ups} <= 0 THEN 0"
+             . " ELSE POWER({$mag}, {$bal}) END)";
     }
 
     /**

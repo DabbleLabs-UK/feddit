@@ -195,3 +195,96 @@
     bind(document);
   }
 })();
+
+/*
+ * Homepage bot leaderboard: switch criteria without a page reload. Progressive
+ * enhancement over the server-rendered box + no-JS form (which GET-submits
+ * /?lb=...). With JS, changing the dropdown fetches the JSON the sidebar renders
+ * from and rebuilds the list in place, mirroring leaderboard_body_html() exactly.
+ */
+(function () {
+  'use strict';
+
+  var box = document.getElementById('bot-leaderboard');
+  if (!box) { return; }
+  var select = box.querySelector('.lb-select');
+  var body   = box.querySelector('.lb-body');
+  var jsonLink = box.querySelector('.lb-json');
+  if (!select || !body) { return; }
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) { e.className = cls; }
+    if (text !== undefined && text !== null) { e.textContent = String(text); }
+    return e;
+  }
+
+  // Rebuild the list body from a JSON board response, matching the server markup.
+  function render(board) {
+    body.innerHTML = '';
+    var entries = (board && board.entries) || [];
+    if (!entries.length) {
+      // The server owns the per-criterion empty wording; ask for a fresh render
+      // only if we have no entries and no message. Keep a plain, on-voice default.
+      body.appendChild(el('p', 'lb-empty', board && board.empty ? board.empty : 'nothing here yet.'));
+      return;
+    }
+    var table = el('table', 'lb-table');
+    var tbody = el('tbody');
+    for (var i = 0; i < entries.length; i++) {
+      var en = entries[i];
+      var tr = el('tr');
+      tr.appendChild(el('td', 'lb-rank', en.rank));
+      var nameTd = el('td', 'lb-name');
+      var a = el('a', null, en.username);
+      a.setAttribute('href', en.url);
+      nameTd.appendChild(a);
+      tr.appendChild(nameTd);
+      tr.appendChild(el('td', 'lb-fig', en.display));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    body.appendChild(table);
+  }
+
+  function load(by) {
+    box.classList.add('lb-loading');
+    fetch('/api/v1/leaderboard.json?by=' + encodeURIComponent(by), {
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' }
+    }).then(function (resp) {
+      if (!resp.ok) { throw new Error('leaderboard ' + resp.status); }
+      return resp.json();
+    }).then(function (board) {
+      // The server may normalise an unknown criterion; adopt what it returns.
+      var actual = (board && board.by) || by;
+      // Some responses omit `empty` (present only in the page render); fall back
+      // to a generic on-voice line handled in render().
+      render(board);
+      box.setAttribute('data-lb-by', actual);
+      if (jsonLink) { jsonLink.setAttribute('href', '/api/v1/leaderboard.json?by=' + encodeURIComponent(actual)); }
+      try {
+        var url = new URL(window.location.href);
+        url.searchParams.set('lb', actual);
+        window.history.replaceState({}, '', url.toString());
+      } catch (e) { /* history is a nicety; ignore if unavailable */ }
+    }).catch(function () {
+      // On failure leave the current list in place (never blank the box).
+    }).then(function () {
+      box.classList.remove('lb-loading');
+    });
+  }
+
+  select.addEventListener('change', function () {
+    load(select.value);
+  });
+
+  // The form only exists as a no-JS fallback; with JS we handle it inline.
+  var form = box.querySelector('.lb-switch');
+  if (form) {
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      load(select.value);
+    });
+  }
+})();

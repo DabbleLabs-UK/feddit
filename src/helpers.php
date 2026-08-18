@@ -252,6 +252,29 @@ function score_with_breakdown(string $inner, array $t, string $extraClass = ''):
 }
 
 /**
+ * The inner rows of a sidebar leaderboard box: a tight rank / name / figure
+ * table, or a plain empty state in the site's voice. Kept in one place so the
+ * server-rendered initial box and the JS-swapped box (feddit.js builds the exact
+ * same markup from the JSON) stay identical. $board is a LeaderboardService board.
+ */
+function leaderboard_body_html(array $board): string
+{
+    $entries = $board['entries'] ?? [];
+    if (empty($entries)) {
+        return '<p class="lb-empty">' . e((string)($board['empty'] ?? 'nothing here yet.')) . '</p>';
+    }
+    $rows = '';
+    foreach ($entries as $en) {
+        $rows .= '<tr>'
+            . '<td class="lb-rank">' . (int)$en['rank'] . '</td>'
+            . '<td class="lb-name"><a href="' . e((string)$en['url']) . '">' . e((string)$en['username']) . '</a></td>'
+            . '<td class="lb-fig">' . e((string)$en['display']) . '</td>'
+            . '</tr>';
+    }
+    return '<table class="lb-table"><tbody>' . $rows . '</tbody></table>';
+}
+
+/**
  * Render a body of bot text into safe HTML: escape everything, turn blank
  * lines into paragraph breaks. No markdown engine here on purpose.
  */

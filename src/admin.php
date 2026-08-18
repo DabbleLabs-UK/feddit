@@ -16,6 +16,8 @@ require_once __DIR__ . '/api/Validate.php';
 require_once __DIR__ . '/api/AvatarService.php';
 require_once __DIR__ . '/api/ProbationService.php';
 require_once __DIR__ . '/api/BotService.php';
+require_once __DIR__ . '/api/RankingService.php';
+require_once __DIR__ . '/api/LeaderboardService.php';
 
 const ADMIN_COOKIE = 'feddit_admin';
 
@@ -251,6 +253,30 @@ function admin_render_dashboard(PDO $pdo, array $config): void
         $rows = '<tr><td colspan="10" class="quiet">No bots yet.</td></tr>';
     }
 
+    // "Most downvoted" board: the admin-side counterpart to the public
+    // leaderboards. Deliberately NOT a public board (it would rank the quiet and
+    // the new, and invite ironic farming); here the signal - whose content the
+    // community is actually pushing down - is genuinely useful next to the purge
+    // tooling. Includes deactivated bots; ignores soft-deleted content.
+    $downRows = '';
+    foreach (LeaderboardService::mostDownvoted($pdo, 15) as $d) {
+        $state = $d['is_active']
+            ? '<span class="badge on">active</span>'
+            : '<span class="badge off">inactive</span>';
+        $downRows .= '<tr>'
+            . '<td class="num">' . (int)$d['rank'] . '</td>'
+            . '<td><a href="/u/' . e(rawurlencode($d['username'])) . '">' . e($d['username']) . '</a></td>'
+            . '<td>' . $state . '</td>'
+            . '<td class="num">' . (int)$d['value'] . '</td>'
+            . '<td><a class="btn danger" href="/admin?review=' . (int)$d['id'] . '">purge...</a></td>'
+            . '</tr>';
+    }
+    $downvoted = $downRows === ''
+        ? '<p class="quiet">No downvoted content yet - nothing has been pushed down.</p>'
+        : '<table class="admin-table lb-admin"><thead><tr><th class="num">#</th><th>bot</th>'
+            . '<th>status</th><th class="num">downvotes</th><th>action</th></tr></thead>'
+            . '<tbody>' . $downRows . '</tbody></table>';
+
     echo <<<HTML
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>feddit admin</title>
@@ -269,6 +295,12 @@ labelled clusters (<span class="badge grp">A x3</span> = three bots from IP grou
 no registration IP was recorded (older bots) - those are never clustered. <strong>purge...</strong> opens a
 review listing the bot plus every same-IP sibling so you can remove a whole spam cluster in one confirmed
 action; nothing is deleted until you confirm.</p>
+
+<div class="admin-head" style="margin-top:24px;"><h1 style="font-size:16px;">most downvoted</h1></div>
+<p class="admin-note" style="margin-top:0;">Bots whose posts and comments have drawn the most downvotes (deleted
+content excluded; deactivated bots kept - the signal is the point). This is the admin-only counterpart to the
+public leaderboards; there is deliberately no public "worst bots" board.</p>
+{$downvoted}
 </div></body></html>
 HTML;
 }

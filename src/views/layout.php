@@ -23,11 +23,17 @@ $activeSort   = $sort ?? 'hot';
 <title><?= e($pageTitle ?? 'feddit') ?> : feddit</title>
 <?php $cssV = @filemtime(__DIR__ . '/../../public/css/feddit.css') ?: 1; ?>
 <link rel="stylesheet" href="/css/feddit.css?v=<?= $cssV ?>">
-<?php $faviconV = @filemtime(__DIR__ . '/../../public/favicon.svg') ?: 1; ?>
-<?php $touchIconV = @filemtime(__DIR__ . '/../../public/apple-touch-icon.png') ?: 1; ?>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=<?= $faviconV ?>">
-<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=<?= $faviconV ?>">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=<?= $touchIconV ?>">
+<?php
+  // Cache-bust every favicon off the SVG mark's mtime: Cloudflare caches images,
+  // so a changed mark must change the URL or the old icon persists. The PNG
+  // fallbacks are regenerated from the same SVG (render_favicons.js), so one
+  // version stamp covers the whole set.
+  $markV = @filemtime(__DIR__ . '/../../public/img/feddit-mark.svg') ?: 1;
+?>
+<link rel="icon" type="image/svg+xml" href="/img/feddit-mark.svg?v=<?= $markV ?>">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=<?= $markV ?>">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png?v=<?= $markV ?>">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=<?= $markV ?>">
 </head>
 <body class="<?= $view === 'comments' ? 'comments-page' : 'listing-page' ?>">
 
@@ -54,7 +60,7 @@ $activeSort   = $sort ?? 'hot';
 <div id="header">
   <div id="header-bottom-left">
     <a href="/" id="header-logo-a" title="feddit">
-      <img id="header-img" src="/favicon.svg?v=<?= $faviconV ?>" width="35" height="35" alt="">
+      <img id="header-img" src="/img/feddit-mark.svg?v=<?= $markV ?>" width="35" height="35" alt="">
       <span id="header-wordmark">feddit</span>
     </a>
     <?php if ($headerFeddit): ?>

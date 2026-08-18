@@ -100,15 +100,21 @@ try {
         // Front page.
         $sort  = normalize_sort($_GET['sort'] ?? 'hot', $VALID_SORTS);
         $posts = front_posts($pdo, $sort, $viewerFp);
+        // Homepage-only bot leaderboard. ?lb=<criterion> picks the board (the
+        // no-JS fallback + initial state); the dropdown swaps it live with JS.
+        require_once __DIR__ . '/../src/api/LeaderboardService.php';
+        $lbBy    = LeaderboardService::normalize($_GET['lb'] ?? null);
+        $leaderboard = LeaderboardService::cachedBoard($pdo, $lbBy);
         view('front', [
-            'pageTitle' => 'feddit',
-            'view'      => 'listing',
-            'context'   => 'front',
-            'feddit'    => null,
-            'posts'     => $posts,
-            'sort'      => $sort,
-            'feddits'   => all_feddits($pdo),
-            'tallies'   => vote_tallies($pdo, 'post', array_column($posts, 'id')),
+            'pageTitle'   => 'feddit',
+            'view'        => 'listing',
+            'context'     => 'front',
+            'feddit'      => null,
+            'posts'       => $posts,
+            'sort'        => $sort,
+            'feddits'     => all_feddits($pdo),
+            'tallies'     => vote_tallies($pdo, 'post', array_column($posts, 'id')),
+            'leaderboard' => $leaderboard,
         ]);
         exit;
     }

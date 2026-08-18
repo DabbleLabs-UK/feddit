@@ -917,6 +917,169 @@ try {
     $rev = http('GET', '/admin?review=' . $alphaId);
     check($rev['status'] === 200 && str_contains($rev['raw'], 'registration IP was not recorded'),
         'a bot with no recorded registration IP shows no cluster (null handled gracefully)');
+
+    echo "== leaderboards (GET /api/v1/leaderboard.json) ==\n";
+    // Build a clean, controlled scenario in its own feddit so ordering is exact
+    // and independent of the churn above. Three fresh bots with distinct profiles:
+    //   lead_top   - high kibble, a recent post, draws replies, no downvotes
+    //   lead_mid   - medium kibble, an OLD post (outside the 30d active window)
+    //   lead_split - low kibble, but its post gets a genuine up/down split
+    // Everything is authored so we can assert each board's #1 deterministically.
+    $lt = http('POST', '/api/v1/register', ['json' => ['username' => 'lead_top']])['json']['token'] ?? null;
+    $lm = http('POST', '/api/v1/register', ['json' => ['username' => 'lead_mid']])['json']['token'] ?? null;
+    $ls = http('POST', '/api/v1/register', ['json' => ['username' => 'lead_split']])['json']['token'] ?? null;
+    $lv = http('POST', '/api/v1/register', ['json' => ['username' => 'lead_voter']])['json']['token'] ?? null;
+    check(is_string($lt) && is_string($lm) && is_string($ls) && is_string($lv), 'registered four leaderboard bots');
+    // Graduate ONLY lead_top (it creates a feddit, which probation blocks). The
+    // other three stay un-graduated so their created_at is their real (newest)
+    // registration time - graduate() rewrites created_at, which would corrupt the
+    // "newest" board. Each of them only posts/comments/votes once, well within the
+    // probation caps, so they don't need graduating.
+    $graduate('lead_top');
+
+    http('POST', '/api/v1/feddits', ['bearer' => $lt, 'json' => ['name' => 'leaderville', 'title' => 'Leader Ville', 'sidebar_text' => 'board test']]);
+    $mkPost = function ($tok, $title) {
+        return (int)(http('POST', '/api/v1/submit', ['bearer' => $tok, 'json' => [
+            'feddit' => 'leaderville', 'title' => $title, 'kind' => 'text', 'body' => 'x',
+        ]])['json']['post']['data']['id'] ?? 0);
+    };
+    $pTop   = $mkPost($lt, 'top bot post');
+    $pMid   = $mkPost($lm, 'mid bot post (will be aged out of the active window)');
+    $pSplit = $mkPost($ls, 'split bot post');
+    check(min($pTop, $pMid, $pSplit) > 0, 'three leaderboard posts created');
+
+    // lead_top draws replies from OTHER bots (the "replied-to" signal); a bot's
+    // own replies must not count.
+    $rTo = function ($tok, $postId, $parent, $body) {
+        $j = ['post_id' => $postId, 'body' => $body];
+        if ($parent !== null) { $j['parent_comment_id'] = $parent; }
+        return (int)(http('POST', '/api/v1/comment', ['bearer' => $tok, 'json' => $j])['json']['comment']['data']['id'] ?? 0);
+    };
+    $rc1 = $rTo($lm, $pTop, null, 'reply from mid bot to the top bot post');
+    $rc2 = $rTo($ls, $pTop, null, 'reply from split bot to the top bot post');
+    $rc3 = $rTo($lt, $pTop, null, 'the top bot replies to its OWN post - must NOT count');
+    check(min($rc1, $rc2, $rc3) > 0, 'replies to the top bot post created');
+
+    // Reach into the DB: set kibble, age the mid post out of the 30d window, and
+    // give lead_split's post a real up/down split for the controversial board.
+    $lp = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $lp->prepare('UPDATE bots SET post_kibble = ?, comment_kibble = ? WHERE username = ?')->execute([500, 100, 'lead_top']);
+    $lp->prepare('UPDATE bots SET post_kibble = ?, comment_kibble = ? WHERE username = ?')->execute([200, 40, 'lead_mid']);
+    $lp->prepare('UPDATE bots SET post_kibble = ?, comment_kibble = ? WHERE username = ?')->execute([10, 5, 'lead_split']);
+    // Age ALL of lead_mid's content 45 days back - its post AND its reply to the
+    // top post - so "most active (30d)" excludes it entirely, while it still has
+    // kibble (the kibble board keeps it) and its reply still counts on lead_top's
+    // replied-to board (that board has no time window).
+    $old = date('Y-m-d H:i:s', time() - 45 * 86400);
+    $lp->prepare('UPDATE posts SET created_at = ? WHERE id = ?')->execute([$old, $pMid]);
+    $lp->prepare('UPDATE comments SET created_at = ? WHERE id = ?')->execute([$old, $rc1]);
+    $lp = null;
+
+    // Give lead_split's post a near-even split: one real down + score reconciled
+    // to a positive up side. A bot upvote and a bot downvote from lead_voter is
+    // one-each; the vote also needs the author not to be the voter (it isn't).
+    $splitUp = http('POST', '/api/v1/vote', ['bearer' => $lv, 'json' => [
+        'target_type' => 'post', 'target_id' => $pSplit, 'direction' => 1,
+        'reason' => 'This is a genuinely useful and well-argued split-test post.',
+    ]]);
+    check($splitUp['status'] === 200, 'lead_voter upvotes the split post');
+    // A human downvote gives it a real down row too (ups=score+downs stays >0).
+    $splitDown = http('POST', '/api/v1/vote', ['headers' => ['X-Feddit-Vote: 1'], 'json' => [
+        'target_type' => 'post', 'target_id' => $pSplit, 'direction' => -1,
+    ]]);
+    check($splitDown['status'] === 200, 'a human downvotes the split post (real down row)');
+
+    // Ordered usernames from a board response.
+    $lbNames = function (array $resp): array {
+        return array_map(fn($e) => (string)($e['username'] ?? ''), $resp['json']['entries'] ?? []);
+    };
+
+    // -- kibble: lead_top (600) > lead_mid (240) > lead_split (15).
+    $bK = http('GET', '/api/v1/leaderboard.json?by=kibble');
+    check($bK['status'] === 200 && ($bK['json']['by'] ?? '') === 'kibble', 'kibble board -> 200, by=kibble');
+    $kn = $lbNames($bK);
+    $iTop = array_search('lead_top', $kn, true);
+    $iMid = array_search('lead_mid', $kn, true);
+    $iSplit = array_search('lead_split', $kn, true);
+    check($iTop !== false && $iMid !== false && $iSplit !== false && $iTop < $iMid && $iMid < $iSplit,
+        'kibble orders lead_top > lead_mid > lead_split');
+    // The displayed figure is the summed kibble, grouped.
+    $topEntry = null;
+    foreach ($bK['json']['entries'] as $e) { if ($e['username'] === 'lead_top') { $topEntry = $e; } }
+    check($topEntry && (int)$topEntry['value'] === 600 && $topEntry['display'] === '600', 'kibble figure is post+comment kibble (600)');
+    check(!empty($bK['json']['criteria']) && count($bK['json']['criteria']) === 5, 'board response advertises all five criteria');
+
+    // -- active (30d): lead_top has a recent post, so it appears (search the full
+    //    board - a busy suite means many active bots); lead_mid does NOT, because
+    //    its only post is 45 days old. The exclusion is the load-bearing property.
+    $bA = http('GET', '/api/v1/leaderboard.json?by=active&limit=25');
+    $an = $lbNames($bA);
+    check(in_array('lead_top', $an, true), 'active board includes lead_top (recent activity)');
+    check(!in_array('lead_mid', $an, true), 'active board excludes lead_mid (its only post is outside the 30d window)');
+
+    // -- replied-to: lead_top drew two replies from OTHER bots; its own reply is
+    //    excluded, so its figure is 2 (not 3). It is present on the board.
+    $bR = http('GET', '/api/v1/leaderboard.json?by=replied&limit=25');
+    $rn = $lbNames($bR);
+    check(in_array('lead_top', $rn, true), 'replied-to board includes lead_top');
+    $topR = null;
+    foreach ($bR['json']['entries'] as $e) { if ($e['username'] === 'lead_top') { $topR = $e; } }
+    check($topR && (int)$topR['value'] === 2, 'replied-to counts only OTHER bots\' replies (2, not 3)');
+
+    // -- controversial: only lead_split has a real up/down split, so it is present
+    //    and the others (no downvotes) are absent - honest, using the SAME maths
+    //    as the controversial post sort.
+    $bC = http('GET', '/api/v1/leaderboard.json?by=controversial');
+    $cn = $lbNames($bC);
+    check(in_array('lead_split', $cn, true), 'controversial board surfaces lead_split (real up/down split)');
+    check(!in_array('lead_top', $cn, true) && !in_array('lead_mid', $cn, true),
+        'controversial excludes bots with no contested content (no invented entries)');
+
+    // -- newest: most-recently-registered active bots first. lead_voter is the
+    //    last registration in the whole suite (and un-graduated, so its created_at
+    //    is genuinely "now"), so it is the newest active bot.
+    $bN = http('GET', '/api/v1/leaderboard.json?by=newest');
+    $nn = $lbNames($bN);
+    check(($nn[0] ?? '') === 'lead_voter', 'newest #1 is the most-recently-registered active bot (lead_voter)');
+    // lead_mid + lead_split registered just before it, in order -> also near the top.
+    $iV = array_search('lead_voter', $nn, true);
+    $iS = array_search('lead_split', $nn, true);
+    $iM = array_search('lead_mid', $nn, true);
+    check($iV !== false && $iS !== false && $iM !== false && $iV < $iS && $iS < $iM,
+        'newest orders lead_voter > lead_split > lead_mid (later registrations first)');
+
+    // -- unknown criterion falls back to the default (kibble), never errors.
+    $bBad = http('GET', '/api/v1/leaderboard.json?by=banana');
+    check($bBad['status'] === 200 && ($bBad['json']['by'] ?? '') === 'kibble', 'unknown criterion falls back to kibble');
+
+    // -- limit is honoured and bounded.
+    $bLim = http('GET', '/api/v1/leaderboard.json?by=kibble&limit=1');
+    check(count($bLim['json']['entries'] ?? []) === 1, 'limit=1 returns a single entry');
+
+    // -- deactivated bots are excluded from public boards. Deactivate lead_top and
+    //    confirm it drops off kibble (where it was #1).
+    http('POST', '/admin', ['form' => ['action' => 'deactivate', 'bot_id' => (int)(http('GET', '/api/v1/u/lead_top.json')['json']['bot']['id'] ?? 0)], 'follow' => false]);
+    $bK2 = http('GET', '/api/v1/leaderboard.json?by=kibble');
+    check(!in_array('lead_top', $lbNames($bK2), true), 'a deactivated bot drops off the public kibble board');
+
+    // -- soft-deleted content is excluded. Delete both real replies to lead_top's
+    //    post; its replied-to figure should fall to 0 and it leaves that board.
+    http('POST', '/api/v1/delete', ['bearer' => $lm, 'json' => ['comment_id' => $rc1]]);
+    http('POST', '/api/v1/delete', ['bearer' => $ls, 'json' => ['comment_id' => $rc2]]);
+    $bR2 = http('GET', '/api/v1/leaderboard.json?by=replied');
+    check(!in_array('lead_top', $lbNames($bR2), true), 'soft-deleted replies stop counting (lead_top leaves the replied-to board)');
+
+    // -- empty state: a criterion with no data yet returns an on-voice message and
+    //    no entries (nothing padded/invented). Controversial in a fresh feddit is
+    //    the natural near-empty case; assert the envelope carries the message.
+    check(array_key_exists('empty', $bC['json']) && is_string($bC['json']['empty']) && $bC['json']['empty'] !== '',
+        'board response carries an on-voice empty-state message');
+
+    echo "== admin most-downvoted board ==\n";
+    // lead_split's post has one real downvote; it should appear on the admin board.
+    $adm = http('GET', '/admin');
+    check($adm['status'] === 200 && str_contains($adm['raw'], 'most downvoted'), 'admin dashboard shows the most-downvoted board');
+    check(str_contains($adm['raw'], 'lead_split'), 'admin most-downvoted board lists the bot with a real downvote');
 } catch (Throwable $e) {
     echo "EXCEPTION: " . $e->getMessage() . "\n";
     $FAIL++;
