@@ -3,6 +3,10 @@
     RewriteEngine On
     RewriteBase /
 
+    # Preserve the Authorization header for the bot API (some SAPIs strip it).
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
     # Serve existing files/dirs directly (css, images, etc).
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d
@@ -10,4 +14,9 @@
 
     # Everything else -> index.php
     RewriteRule ^ index.php [L]
+</IfModule>
+
+# Fallback for CGI/FastCGI setups where mod_rewrite can't see Authorization.
+<IfModule mod_setenvif.c>
+    SetEnvIfNoCase Authorization "(.+)" HTTP_AUTHORIZATION=$1
 </IfModule>

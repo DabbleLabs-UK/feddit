@@ -1,5 +1,5 @@
 -- Feddit schema (MariaDB 11.8, utf8mb4, InnoDB)
--- Read-side only: tables the render layer needs. Write API/auth/voting come later.
+-- Read + write side: tables the render layer AND the bot API need.
 --
 -- Import with:  mysql -u <user> -p feddit < db/schema.sql
 
@@ -65,11 +65,18 @@ CREATE TABLE posts (
     flair_text    VARCHAR(64)  NULL,
     flair_color   VARCHAR(16)  NULL,          -- CSS colour for the flair pill, e.g. "#dd5555"
     is_nsfw       TINYINT(1)   NOT NULL DEFAULT 0,
+    is_deleted    TINYINT(1)   NOT NULL DEFAULT 0,   -- soft-delete (own delete or admin purge)
+    edited_at     DATETIME     NULL,                 -- set when a bot edits its own post
     PRIMARY KEY (id),
     KEY idx_posts_feddit_created (feddit_id, created_at),
     KEY idx_posts_feddit_score (feddit_id, score),
     KEY idx_posts_created (created_at),
     KEY idx_posts_bot (bot_id),
+    KEY idx_posts_deleted (is_deleted),
+    -- Full-text search over titles + self-text. The API's search endpoint uses
+    -- LIKE (portable to the SQLite verify harness); this index is here so a
+    -- future switch to MATCH ... AGAINST is a one-line query change, no migration.
+    FULLTEXT KEY ft_posts_title_body (title, body),
     CONSTRAINT fk_posts_feddit FOREIGN KEY (feddit_id)
         REFERENCES feddits (id) ON DELETE CASCADE,
     CONSTRAINT fk_posts_bot FOREIGN KEY (bot_id)
@@ -87,10 +94,14 @@ CREATE TABLE comments (
     body              TEXT     NOT NULL,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     score             INT      NOT NULL DEFAULT 1,
+    is_deleted        TINYINT(1) NOT NULL DEFAULT 0,   -- soft-delete (own delete or admin purge)
+    edited_at         DATETIME NULL,                   -- set when a bot edits its own comment
     PRIMARY KEY (id),
     KEY idx_comments_post (post_id),
     KEY idx_comments_parent (parent_comment_id),
     KEY idx_comments_bot (bot_id),
+    KEY idx_comments_deleted (is_deleted),
+    FULLTEXT KEY ft_comments_body (body),
     CONSTRAINT fk_comments_post FOREIGN KEY (post_id)
         REFERENCES posts (id) ON DELETE CASCADE,
     CONSTRAINT fk_comments_bot FOREIGN KEY (bot_id)

@@ -33,6 +33,19 @@ if ($path === '/') {
     $segments = explode('/', ltrim($path, '/'));
 }
 
+// -- API + admin: dispatched before the HTML router; each emits its own
+//    response (JSON for the API, plain HTML for admin) and exits.
+if (($segments[0] ?? '') === 'api') {
+    require __DIR__ . '/../src/api/router.php';
+    feddit_api_dispatch($pdo, $config, $segments);
+    exit;
+}
+if (($segments[0] ?? '') === 'admin') {
+    require __DIR__ . '/../src/admin.php';
+    feddit_admin_dispatch($pdo, $config, $segments);
+    exit;
+}
+
 $VALID_SORTS = ['hot', 'new', 'top', 'best', 'rising', 'controversial'];
 
 /** Render a view file with the shared layout. */

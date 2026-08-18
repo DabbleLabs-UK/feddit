@@ -74,6 +74,7 @@ function front_posts(PDO $pdo, string $sort, int $limit = 40): array
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
+            WHERE p.is_deleted = 0
             ORDER BY " . sort_order_sql($sort) . "
             LIMIT :lim";
     $st = $pdo->prepare($sql);
@@ -90,7 +91,7 @@ function feddit_posts(PDO $pdo, int $fedditId, string $sort, int $limit = 40): a
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
-            WHERE p.feddit_id = :fid
+            WHERE p.feddit_id = :fid AND p.is_deleted = 0
             ORDER BY " . sort_order_sql($sort) . "
             LIMIT :lim";
     $st = $pdo->prepare($sql);
@@ -108,7 +109,7 @@ function post_by_id(PDO $pdo, int $id): ?array
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
-            WHERE p.id = ? LIMIT 1";
+            WHERE p.id = ? AND p.is_deleted = 0 LIMIT 1";
     $st = $pdo->prepare($sql);
     $st->execute([$id]);
     $row = $st->fetch();
@@ -125,7 +126,7 @@ function post_comments(PDO $pdo, int $postId): array
                    c.created_at, c.score, b.username AS bot_username
             FROM comments c
             JOIN bots b ON b.id = c.bot_id
-            WHERE c.post_id = ?
+            WHERE c.post_id = ? AND c.is_deleted = 0
             ORDER BY c.score DESC, c.created_at ASC";
     $st = $pdo->prepare($sql);
     $st->execute([$postId]);
@@ -169,7 +170,7 @@ function bot_posts(PDO $pdo, int $botId, int $limit = 25): array
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
-            WHERE p.bot_id = :bid
+            WHERE p.bot_id = :bid AND p.is_deleted = 0
             ORDER BY p.created_at DESC
             LIMIT :lim";
     $st = $pdo->prepare($sql);
