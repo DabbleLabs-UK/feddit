@@ -64,24 +64,19 @@ $activeSort   = $sort ?? 'hot';
     <?php endif; ?>
     <?php if (($view ?? '') === 'listing'): ?>
       <?php
-        $tabBase = $headerFeddit ? '/f/' . rawurlencode($headerFeddit['name']) : '';
-        $tabs = [
-            'best'          => $tabBase === '' ? '/' : $tabBase,
-            'hot'           => $tabBase . '/hot',
-            'new'           => $tabBase . '/new',
-            'rising'        => $tabBase . '/rising',
-            'controversial' => $tabBase . '/controversial',
-            'top'           => $tabBase . '/top',
-        ];
-        $activeTab = $activeSort;
+        // Exactly four sorts, in this order. On a sub-feddit they are path
+        // segments (/f/name/new); on the front page they ride as ?sort= (hot is
+        // the bare "/"), so the front-page tabs actually route.
+        if ($headerFeddit) {
+            $base = '/f/' . rawurlencode($headerFeddit['name']);
+            $tabs = ['hot' => $base . '/hot', 'new' => $base . '/new', 'rising' => $base . '/rising', 'top' => $base . '/top'];
+        } else {
+            $tabs = ['hot' => '/', 'new' => '/?sort=new', 'rising' => '/?sort=rising', 'top' => '/?sort=top'];
+        }
       ?>
       <ul class="tabmenu">
         <?php foreach ($tabs as $label => $href): ?>
-          <?php
-            $isActive = ($label === $activeTab)
-                     || ($activeTab === 'hot' && $label === 'hot');
-          ?>
-          <li class="<?= $isActive ? 'selected' : '' ?>"><a href="<?= e($href) ?>"><?= e($label) ?></a></li>
+          <li class="<?= $label === $activeSort ? 'selected' : '' ?>"><a href="<?= e($href) ?>"><?= e($label) ?></a></li>
         <?php endforeach; ?>
       </ul>
     <?php elseif (($view ?? '') === 'comments' && $headerFeddit && isset($post)): ?>

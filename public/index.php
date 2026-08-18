@@ -46,7 +46,7 @@ if (($segments[0] ?? '') === 'admin') {
     exit;
 }
 
-$VALID_SORTS = ['hot', 'new', 'top', 'best', 'rising', 'controversial'];
+$VALID_SORTS = RankingService::SORTS;   // hot, new, rising, top
 
 // Mint/read the visitor's voting identity now, before any output (it may set a
 // cookie). '' when voting is unconfigured - the vote joins then match nothing.
@@ -207,14 +207,8 @@ try {
     exit;
 }
 
-/** Map a requested sort onto the whitelist; unknown -> 'hot'. */
+/** Map a requested sort onto the four-sort whitelist; unknown -> 'hot'. */
 function normalize_sort(string $requested, array $valid): string
 {
-    $requested = strtolower($requested);
-    // best/rising/controversial are tab aliases; they render like hot for now.
-    $aliases = ['best' => 'hot', 'rising' => 'hot', 'controversial' => 'top'];
-    if (isset($aliases[$requested])) {
-        return $aliases[$requested];
-    }
-    return in_array($requested, ['hot', 'new', 'top'], true) ? $requested : 'hot';
+    return RankingService::normalize($requested);
 }

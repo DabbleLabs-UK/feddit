@@ -19,6 +19,11 @@ if (!is_file($configLocal)) {
 /** @var array $config */
 $config = require $configLocal;
 
+// Ranking lives in src/api/ so the website and the (future) MCP server order
+// listings identically. Loaded here because feddit_pdo() registers its SQLite
+// shims, and the HTML render path pulls it in without touching the API router.
+require_once __DIR__ . '/api/RankingService.php';
+
 // -- database ---------------------------------------------------------------
 function feddit_pdo(array $config): PDO
 {
@@ -37,6 +42,9 @@ function feddit_pdo(array $config): PDO
             PDO::ATTR_EMULATE_PREPARES   => false,   // real prepared statements
         ]
     );
+    // Teach SQLite (verify harness) the ranking functions MariaDB has natively.
+    // No-op on MariaDB. Keeps one ranking SQL string working on both engines.
+    RankingService::registerSqliteFunctions($pdo);
     return $pdo;
 }
 

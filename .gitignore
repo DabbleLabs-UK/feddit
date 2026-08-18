@@ -6,14 +6,19 @@ node_modules/
 *.log
 .DS_Store
 
-# Local render-verification scratch (SQLite harness, dumped HTML)
-verify/
+# Verify harness: the TEST CODE is tracked (verify/*.php + verify/README.md).
+# Only its generated artefacts are ignored - the throwaway SQLite DBs, the dumped
+# HTML snapshots, server logs and curl cookie jars.
 *.sqlite
+verify/*.sqlite
+verify/*.html
+verify/*.txt
 
 # Screenshot / scratch outputs
 outputs/
 capture.js
 cap2.js
+hover_capture.js
 package.json
 package-lock.json
 node_modules/

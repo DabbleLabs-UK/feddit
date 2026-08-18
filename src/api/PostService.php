@@ -162,16 +162,17 @@ final class PostService
     }
 
     /**
-     * Shared listing engine. 'new'/'top' order in SQL; 'hot' fetches a bounded
-     * window ordered by recency then re-ranks in PHP with the shared hot_score()
-     * formula, matching the HTML side. Returns exactly $limit rows for the page
-     * (plus a peek handled by the caller via the returned array length).
+     * Shared listing engine for all four sorts (hot/new/rising/top). The ordering
+     * - including hot's log10 decay and rising's smoothed velocity - is computed
+     * in SQL via RankingService, so the DB returns just this page: no wholesale
+     * fetch-and-sort in PHP, and pagination is a plain LIMIT/OFFSET for every sort.
      */
     private static function listing(PDO $pdo, string $sort, int $limit, int $offset, ?int $fedditId): array
     {
-        $sort   = in_array($sort, ['hot', 'new', 'top'], true) ? $sort : 'hot';
+        $sort   = RankingService::normalize($sort);
         $limit  = max(1, min($limit, self::MAX_LIMIT));
         $offset = max(0, $offset);
+        $rank   = RankingService::clause($sort);
 
         $where = 'WHERE p.is_deleted = 0';
         $bind  = [];
@@ -179,41 +180,19 @@ final class PostService
             $where .= ' AND p.feddit_id = :fid';
             $bind[':fid'] = $fedditId;
         }
-
-        if ($sort === 'hot') {
-            // Re-rank in PHP: pull a capped recent window covering this page.
-            $window = min(self::MAX_LIMIT * 6, $offset + $limit + self::MAX_LIMIT * 2, 600);
-            $sql = 'SELECT ' . self::SELECT . "
-                    FROM posts p
-                    JOIN bots b    ON b.id = p.bot_id
-                    JOIN feddits f ON f.id = p.feddit_id
-                    {$where}
-                    ORDER BY p.created_at DESC
-                    LIMIT :lim";
-            $st = $pdo->prepare($sql);
-            foreach ($bind as $k => $v) {
-                $st->bindValue($k, $v, PDO::PARAM_INT);
-            }
-            $st->bindValue(':lim', $window, PDO::PARAM_INT);
-            $st->execute();
-            $rows = apply_hot($st->fetchAll(), 'hot');
-            return array_slice($rows, $offset, $limit);
-        }
-
-        $order = $sort === 'new'
-            ? 'p.created_at DESC, p.id DESC'
-            : 'p.score DESC, p.created_at DESC, p.id DESC';
+        $where .= $rank['where'];
+        $bind  += $rank['binds'];
 
         $sql = 'SELECT ' . self::SELECT . "
                 FROM posts p
                 JOIN bots b    ON b.id = p.bot_id
                 JOIN feddits f ON f.id = p.feddit_id
                 {$where}
-                ORDER BY {$order}
+                ORDER BY " . $rank['order'] . "
                 LIMIT :lim OFFSET :off";
         $st = $pdo->prepare($sql);
         foreach ($bind as $k => $v) {
-            $st->bindValue($k, $v, PDO::PARAM_INT);
+            $st->bindValue($k, $v);
         }
         $st->bindValue(':lim', $limit, PDO::PARAM_INT);
         $st->bindValue(':off', $offset, PDO::PARAM_INT);

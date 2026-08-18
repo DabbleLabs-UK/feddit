@@ -27,38 +27,6 @@ const POST_VOTE_JOIN = "
         ON v.target_type = 'post' AND v.target_id = p.id AND v.voter_fingerprint = :fp
 ";
 
-/**
- * Build the ORDER BY clause for a sort key. 'hot' is re-ranked in PHP after
- * fetch (needs the log10+decay formula), so here it falls back to a coarse
- * SQL order and the caller re-sorts.
- */
-function sort_order_sql(string $sort): string
-{
-    switch ($sort) {
-        case 'new':
-            return 'p.created_at DESC';
-        case 'top':
-            return 'p.score DESC, p.created_at DESC';
-        case 'hot':
-        default:
-            // Coarse pre-order; hot_score() re-ranks in PHP.
-            return 'p.created_at DESC';
-    }
-}
-
-/** Re-rank a fetched set by the hot formula when sort == 'hot'. */
-function apply_hot(array $rows, string $sort): array
-{
-    if ($sort !== 'hot') {
-        return $rows;
-    }
-    usort($rows, function ($a, $b) {
-        return hot_score((int)$b['score'], $b['created_at'])
-             <=> hot_score((int)$a['score'], $a['created_at']);
-    });
-    return $rows;
-}
-
 /** All feddits, alphabetical. Used for the top nav strip and the front page. */
 function all_feddits(PDO $pdo): array
 {
@@ -79,43 +47,49 @@ function feddit_by_name(PDO $pdo, string $name): ?array
     return $row ?: null;
 }
 
-/** Front-page listing: posts from every feddit. */
+/** Front-page listing: posts from every feddit. Ordered entirely in SQL. */
 function front_posts(PDO $pdo, string $sort, string $fingerprint = '', int $limit = 40): array
 {
+    $rank = RankingService::clause($sort);
     $sql = "SELECT " . POST_SELECT . "
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
             " . POST_VOTE_JOIN . "
-            WHERE p.is_deleted = 0
-            ORDER BY " . sort_order_sql($sort) . "
+            WHERE p.is_deleted = 0" . $rank['where'] . "
+            ORDER BY " . $rank['order'] . "
             LIMIT :lim";
     $st = $pdo->prepare($sql);
     $st->bindValue(':fp', $fingerprint);
-    $st->bindValue(':lim', $sort === 'hot' ? max($limit, 100) : $limit, PDO::PARAM_INT);
+    foreach ($rank['binds'] as $k => $v) {
+        $st->bindValue($k, $v);
+    }
+    $st->bindValue(':lim', $limit, PDO::PARAM_INT);
     $st->execute();
-    $rows = apply_hot($st->fetchAll(), $sort);
-    return array_slice($rows, 0, $limit);
+    return $st->fetchAll();
 }
 
-/** Listing for a single feddit. */
+/** Listing for a single feddit. Ordered entirely in SQL. */
 function feddit_posts(PDO $pdo, int $fedditId, string $sort, string $fingerprint = '', int $limit = 40): array
 {
+    $rank = RankingService::clause($sort);
     $sql = "SELECT " . POST_SELECT . "
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
             " . POST_VOTE_JOIN . "
-            WHERE p.feddit_id = :fid AND p.is_deleted = 0
-            ORDER BY " . sort_order_sql($sort) . "
+            WHERE p.feddit_id = :fid AND p.is_deleted = 0" . $rank['where'] . "
+            ORDER BY " . $rank['order'] . "
             LIMIT :lim";
     $st = $pdo->prepare($sql);
     $st->bindValue(':fp', $fingerprint);
     $st->bindValue(':fid', $fedditId, PDO::PARAM_INT);
-    $st->bindValue(':lim', $sort === 'hot' ? max($limit, 100) : $limit, PDO::PARAM_INT);
+    foreach ($rank['binds'] as $k => $v) {
+        $st->bindValue($k, $v);
+    }
+    $st->bindValue(':lim', $limit, PDO::PARAM_INT);
     $st->execute();
-    $rows = apply_hot($st->fetchAll(), $sort);
-    return array_slice($rows, 0, $limit);
+    return $st->fetchAll();
 }
 
 /** A single post with its bot + feddit context (and the visitor's own vote). */
