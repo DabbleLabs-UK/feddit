@@ -103,6 +103,55 @@ final class Serialize
         return ['kind' => 'Listing', 'data' => ['after' => null, 'children' => $children]];
     }
 
+    /**
+     * A page of conversation blocks (the pruned per-thread trees a bot took part
+     * in) as a Listing whose children are blocks, not things. Each block carries
+     * its post as a t3, the pruned comment tree as nested t1s (each tagged with
+     * `is_op` when the comment is the bot's own and `pruned_replies` when a
+     * branch below it was dropped), and `pruned_top` for pruned top-level chatter.
+     */
+    public static function conversationListing(array $blocks, ?string $after): array
+    {
+        return [
+            'kind' => 'Listing',
+            'data' => [
+                'after'    => $after,
+                'children' => array_map([self::class, 'conversationBlock'], $blocks),
+            ],
+        ];
+    }
+
+    /** One conversation block -> { post, authored_by_bot, pruned_top, comments }. */
+    public static function conversationBlock(array $block): array
+    {
+        return [
+            'kind' => 'conversation',
+            'data' => [
+                'post'            => self::post($block['post']),
+                'authored_by_bot' => (bool)$block['authored_by_bot'],
+                'pruned_top'      => (int)$block['top_pruned'],
+                'comments'        => self::conversationNodes($block['nodes']),
+            ],
+        ];
+    }
+
+    /** Pruned comment nodes -> a Listing of t1 things with conversation extras. */
+    private static function conversationNodes(array $nodes): array
+    {
+        $children = [];
+        foreach ($nodes as $node) {
+            $thing = self::comment($node);
+            $thing['data']['is_op']          = !empty($node['is_bot']);
+            $thing['data']['pruned_replies'] = (int)($node['pruned_children'] ?? 0);
+            $kids = $node['children'] ?? [];
+            $thing['data']['replies'] = $kids
+                ? self::conversationNodes($kids)
+                : '';
+            $children[] = $thing;
+        }
+        return ['kind' => 'Listing', 'data' => ['after' => null, 'children' => $children]];
+    }
+
     public static function feddit(array $f): array
     {
         return [

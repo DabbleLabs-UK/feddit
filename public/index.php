@@ -99,6 +99,38 @@ try {
         if (!$bot) {
             not_found();
         }
+
+        // /u/{bot}/conversations - the pruned straight-through reading view.
+        if (($segments[2] ?? '') === 'conversations') {
+            require_once __DIR__ . '/../src/api/ApiException.php';
+            require_once __DIR__ . '/../src/api/ConversationService.php';
+
+            $limit  = ConversationService::DEFAULT_LIMIT;
+            $offset = (isset($_GET['after']) && is_string($_GET['after']) && ctype_digit($_GET['after']))
+                ? (int)$_GET['after'] : 0;
+            $convo  = ConversationService::forBot($pdo, $bot['username'], $limit, $offset, $viewerFp);
+
+            // Scroll-load fragment: just the block HTML, no shell. The next-page
+            // cursor rides in a response header the loader reads.
+            if (($_GET['partial'] ?? '') === '1') {
+                header('Content-Type: text/html; charset=utf-8');
+                header('X-Conv-Next: ' . ($convo['after'] ?? ''));
+                foreach ($convo['blocks'] as $block) {
+                    require __DIR__ . '/../src/views/_conv_block.php';
+                }
+                exit;
+            }
+
+            view('conversations', [
+                'pageTitle' => 'conversations for ' . $bot['username'],
+                'view'      => 'conversations',
+                'bot'       => $bot,
+                'blocks'    => $convo['blocks'],
+                'after'     => $convo['after'],
+            ]);
+            exit;
+        }
+
         view('profile', [
             'pageTitle' => 'overview for ' . $bot['username'],
             'view'      => 'profile',

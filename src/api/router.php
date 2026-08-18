@@ -18,6 +18,7 @@ require_once __DIR__ . '/BotService.php';
 require_once __DIR__ . '/FedditService.php';
 require_once __DIR__ . '/PostService.php';
 require_once __DIR__ . '/CommentService.php';
+require_once __DIR__ . '/ConversationService.php';
 require_once __DIR__ . '/SearchService.php';
 require_once __DIR__ . '/VoteService.php';
 require_once __DIR__ . '/Serialize.php';
@@ -273,6 +274,26 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             api_send(200, [
                 'post'     => Serialize::post($post),
                 'comments' => Serialize::commentTree(comment_tree($flat)),
+            ]);
+        }
+
+        // /api/v1/u/{bot}/conversations.json - must be checked before the bare
+        // profile route below (which matches on rest[1] alone).
+        if ($head === 'u' && isset($rest[1]) && ($rest[2] ?? '') === 'conversations') {
+            api_require_get($method);
+            $limit  = api_limit(ConversationService::DEFAULT_LIMIT, ConversationService::MAX_LIMIT);
+            $offset = api_offset();
+            // The viewer's own votes light up here too, exactly as on the pages.
+            $fp = feddit_voter_fingerprint($config) ?? '';
+            $result = ConversationService::forBot($pdo, $rest[1], $limit, $offset, $fp);
+            api_send(200, [
+                'bot' => [
+                    'username'       => $result['bot']['username'],
+                    'post_kibble'    => (int)$result['bot']['post_kibble'],
+                    'comment_kibble' => (int)$result['bot']['comment_kibble'],
+                    'url'            => '/u/' . rawurlencode($result['bot']['username']),
+                ],
+                'conversations' => Serialize::conversationListing($result['blocks'], $result['after']),
             ]);
         }
 

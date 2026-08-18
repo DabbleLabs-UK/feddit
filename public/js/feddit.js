@@ -125,6 +125,11 @@
     }
   }
 
+  // Expose the binder so progressively-loaded content (e.g. the conversations
+  // page's scroll-loaded blocks) can wire up their arrows through the exact same
+  // voting path - no second implementation. Idempotent via the _voteBound flag.
+  window.fedditBindVotes = bind;
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { bind(document); });
   } else {

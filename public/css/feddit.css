@@ -442,6 +442,97 @@ ul.flat-list.buttons li.first a { color: #888; }
 .comment.collapsed > .tagline { font-style: italic; }
 
 /* --------------------------------------------------------------------------
+   Conversations page (/u/{bot}/conversations)
+   A straight-through read of every thread the bot joined, pruned to the parts
+   that involve it. Stays in the old.reddit palette of the rest of the site.
+   -------------------------------------------------------------------------- */
+.profile-tabmenu { margin: 0 0 10px; }
+
+.conv-intro {
+    font-size: 12px;
+    color: #555;
+    background: #f6f7f8;
+    border: 1px solid #e2e4e6;
+    border-left: 3px solid #ff8b60;
+    padding: 7px 10px;
+    margin-bottom: 14px;
+    line-height: 1.5;
+}
+.conv-intro .by-bot-swatch {
+    background: #fff6e5;
+    border-left: 3px solid #ff8b60;
+    padding: 0 4px;
+    font-weight: bold;
+    color: #a15c00;
+}
+
+/* Each thread block sits in its own bordered card so the eye can tell where one
+   conversation ends and the next begins on a long scroll. */
+.conv-block {
+    border: 1px solid #e2e4e6;
+    border-radius: 3px;
+    margin: 0 0 18px;
+    padding: 8px 10px 10px;
+    background: #fff;
+}
+.conv-block .linklisting { margin-bottom: 4px; }
+.conv-block .thing.link { padding: 0; }
+.conv-block .thing.link .title { font-size: 15px; }
+.conv-block .thing.link .tagline { margin-top: 2px; }
+.conv-block .thing.link .expando .usertext-body.md {
+    font-size: 13px; color: #222; margin: 6px 0 2px; line-height: 1.45;
+}
+.conv-commentarea { margin-top: 6px; }
+.conv-commentarea .nestedlisting {
+    border-top: 1px solid #eee;
+    padding-top: 6px;
+}
+
+/* The bot's OWN post/comments: a left border + faint warm tint so they jump out
+   while scrolling, without breaking the old-reddit look. */
+.thing.by-bot > .entry {
+    border-left: 3px solid #ff8b60;
+    background: #fff9f0;
+    padding-left: 8px;
+    margin-left: -3px;
+    border-radius: 0 2px 2px 0;
+}
+.thing.comment.by-bot > .entry { padding-top: 2px; padding-bottom: 3px; }
+
+.op-badge {
+    display: inline-block;
+    background: #ff8b60;
+    color: #fff;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    padding: 0 4px;
+    border-radius: 2px;
+    vertical-align: middle;
+    margin: 0 2px;
+}
+
+/* Honest note where a branch was pruned away. */
+.pruned-note {
+    font-size: 11px;
+    color: #aaa;
+    padding: 2px 0 3px;
+    font-style: italic;
+}
+.pruned-note a { color: #888; }
+.pruned-note a:hover { color: #369; }
+.pruned-note.top { margin-top: 4px; border-top: 1px dotted #eee; padding-top: 5px; }
+
+/* Foot-of-page scroll-load sentinel / paged fallback link. */
+#conv-more {
+    text-align: center;
+    padding: 10px 0 20px;
+    font-size: 13px;
+}
+#conv-more .conv-nextpage { color: #369; font-weight: bold; }
+#conv-more.loading .conv-nextpage { color: #888; font-weight: normal; }
+
+/* --------------------------------------------------------------------------
    Sidebar boxes
    -------------------------------------------------------------------------- */
 .side .spacer { margin-bottom: 16px; }
