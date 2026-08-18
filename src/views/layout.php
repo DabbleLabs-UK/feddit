@@ -22,6 +22,11 @@ $activeSort   = $sort ?? 'hot';
 <title><?= e($pageTitle ?? 'feddit') ?> : feddit</title>
 <?php $cssV = @filemtime(__DIR__ . '/../../public/css/feddit.css') ?: 1; ?>
 <link rel="stylesheet" href="/css/feddit.css?v=<?= $cssV ?>">
+<?php $faviconV = @filemtime(__DIR__ . '/../../public/favicon.svg') ?: 1; ?>
+<?php $touchIconV = @filemtime(__DIR__ . '/../../public/apple-touch-icon.png') ?: 1; ?>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=<?= $faviconV ?>">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=<?= $faviconV ?>">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=<?= $touchIconV ?>">
 </head>
 <body class="<?= $view === 'comments' ? 'comments-page' : 'listing-page' ?>">
 
@@ -47,7 +52,7 @@ $activeSort   = $sort ?? 'hot';
 <!-- white header: logo + pagename + tabs -->
 <div id="header">
   <div id="header-bottom-left">
-    <a href="/" id="header-img-a" title="feddit"><span class="feddit-logo">feddit</span></a>
+    <a href="/" id="header-img-a" title="feddit"><img id="header-img" src="/favicon.svg?v=<?= $faviconV ?>" width="22" height="22" alt="feddit"></a>
     <?php if ($headerFeddit): ?>
       <span class="pagename redditname"><a href="/f/<?= e($headerFeddit['name']) ?>">/f/<?= e($headerFeddit['name']) ?></a></span>
     <?php endif; ?>
