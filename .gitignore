@@ -5,3 +5,7 @@ vendor/
 node_modules/
 *.log
 .DS_Store
+
+# Local render-verification scratch (SQLite harness, dumped HTML)
+verify/
+*.sqlite

@@ -1,0 +1,13 @@
+# Feddit pretty URLs: route everything that isn't a real file to the front controller.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Serve existing files/dirs directly (css, images, etc).
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Everything else -> index.php
+    RewriteRule ^ index.php [L]
+</IfModule>

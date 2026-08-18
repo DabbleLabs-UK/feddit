@@ -1,0 +1,554 @@
+/* ==========================================================================
+   feddit.css - a hand-written homage to old.reddit.com's stylesheet.
+   Not copied from reddit; reproduced from its conventions.
+   Palette: #cee3f8 header blue, #ff4500 accent, Verdana/Arial, small tight type.
+   ========================================================================== */
+
+* { margin: 0; padding: 0; }
+
+html, body {
+    background: #ffffff;
+    color: #000000;
+    font: normal x-small verdana, arial, helvetica, sans-serif;  /* ~10px base */
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+a { color: #369; text-decoration: none; cursor: pointer; }
+a:hover { text-decoration: underline; }
+
+img { border: 0; }
+
+.width-clip { max-width: 1050px; margin: 0 auto; padding: 0 8px; }
+.quiet { color: #888; }
+.clear { clear: both; }
+
+/* --------------------------------------------------------------------------
+   Top sub-feddit shortcut strip (dark bar)
+   -------------------------------------------------------------------------- */
+#sr-header-area {
+    background: #26282b;
+    border-bottom: 1px solid #000;
+    color: #ccc;
+    font-size: 10px;
+    line-height: 18px;
+    height: 18px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+#sr-header-area .width-clip { position: relative; }
+#sr-header-area a { color: #cfe3ff; }
+#sr-header-area a:hover { text-decoration: none; color: #fff; }
+.sr-bar { list-style: none; display: inline; }
+.sr-bar li { display: inline; }
+.sr-bar li.separator { color: #555; margin: 0 4px; }
+.sr-bar li.selflink a { color: #fff; font-weight: bold; }
+.sr-bar-right {
+    position: absolute; right: 8px; top: 0;
+    color: #888; font-style: italic;
+}
+
+/* --------------------------------------------------------------------------
+   White header: logo, pagename, tabs
+   -------------------------------------------------------------------------- */
+#header {
+    background: #cee3f8;
+    border-bottom: 1px solid #5f99cf;
+    padding-top: 4px;
+}
+#header-bottom-left {
+    max-width: 1050px;
+    margin: 0 auto;
+    padding: 0 8px;
+    position: relative;
+    min-height: 40px;
+}
+#header-img-a { display: inline-block; vertical-align: bottom; }
+.feddit-logo {
+    display: inline-block;
+    font-family: verdana, arial, sans-serif;
+    font-weight: bold;
+    font-size: 28px;
+    letter-spacing: -1px;
+    color: #ff4500;
+    line-height: 1;
+    padding: 2px 2px 4px 0;
+}
+.feddit-logo:after {
+    content: "";
+    display: inline-block;
+    width: 8px; height: 8px;
+    margin-left: 3px;
+    border-radius: 50%;
+    background: #ff4500;
+    vertical-align: middle;
+}
+.pagename {
+    display: inline-block;
+    font-size: 16px;
+    font-weight: bold;
+    margin-left: 6px;
+    vertical-align: bottom;
+    padding-bottom: 3px;
+}
+.pagename a { color: #336699; }
+
+.tabmenu {
+    list-style: none;
+    display: block;
+    margin-top: 6px;
+    border-bottom: 1px solid #5f99cf;
+    font-size: 10px;
+}
+.tabmenu li { display: inline-block; margin: 0; }
+.tabmenu li a {
+    display: inline-block;
+    padding: 3px 9px;
+    color: #369;
+    background: #d8e8f8;
+    border: 1px solid #5f99cf;
+    border-bottom: 0;
+    margin-right: 2px;
+    border-radius: 3px 3px 0 0;
+}
+.tabmenu li.selected a {
+    background: #fff;
+    color: #000;
+    font-weight: bold;
+    position: relative;
+    top: 1px;
+}
+.tabmenu li a:hover { text-decoration: none; background: #fff; }
+
+/* --------------------------------------------------------------------------
+   Front-page banner
+   -------------------------------------------------------------------------- */
+#feddit-banner {
+    background: #ff4500;
+    color: #fff;
+    font-size: 12px;
+    padding: 7px 0;
+    border-bottom: 1px solid #cc3700;
+}
+#feddit-banner .width-clip { position: relative; }
+#feddit-banner .banner-text { color: #fff; }
+#feddit-banner strong { color: #fff; }
+#feddit-banner a { color: #fff; text-decoration: underline; font-weight: bold; }
+.banner-dismiss {
+    position: absolute; right: 10px; top: 50%;
+    transform: translateY(-50%);
+    color: #fff; font-size: 16px; font-weight: bold;
+    text-decoration: none; line-height: 1;
+}
+.banner-dismiss:hover { text-decoration: none; color: #ffe0d0; }
+
+/* --------------------------------------------------------------------------
+   Content + sidebar frame
+   -------------------------------------------------------------------------- */
+#content {
+    max-width: 1050px;
+    margin: 0 auto;
+    padding: 12px 8px 30px;
+    position: relative;
+}
+#content:after { content: ""; display: block; clear: both; }
+
+.content { }
+.side {
+    float: right;
+    width: 300px;
+    margin-left: 10px;
+    margin-top: 0;
+}
+.content, .profile-content, .docs-content {
+    /* main column fills the space left of the floated sidebar */
+    overflow: hidden;
+}
+
+.listing-chrome {
+    font-size: 10px;
+    color: #888;
+    margin: 0 0 5px 6px;
+}
+.listing-label { text-transform: lowercase; }
+
+/* --------------------------------------------------------------------------
+   Listing rows (.thing)
+   -------------------------------------------------------------------------- */
+.sitetable { }
+.thing {
+    padding: 4px 0 8px 0;
+    font-size: 10px;
+    position: relative;
+}
+.thing.link { border-bottom: 0; }
+
+.rank {
+    float: left;
+    width: 26px;
+    text-align: right;
+    color: #c6c6c6;
+    font-size: 15px;
+    padding-top: 6px;
+    font-weight: normal;
+}
+
+.midcol {
+    float: left;
+    width: 22px;
+    text-align: center;
+    padding-top: 4px;
+    margin: 0 2px;
+}
+.score {
+    color: #333;
+    font-weight: bold;
+    font-size: 11px;
+    line-height: 12px;
+}
+.score.unvoted { color: #333; }
+
+/* vote arrows drawn as CSS triangles */
+.arrow {
+    width: 0; height: 0;
+    margin: 0 auto;
+    cursor: pointer;
+    display: block;
+}
+.arrow.up {
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-bottom: 11px solid #9a9a9a;
+    margin-bottom: 2px;
+}
+.arrow.down {
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 11px solid #9a9a9a;
+    margin-top: 2px;
+}
+.arrow.up:hover { border-bottom-color: #ff4500; }
+.arrow.down:hover { border-top-color: #5f99cf; }
+
+.thumbnail {
+    float: left;
+    width: 70px;
+    height: 50px;
+    margin: 2px 8px 0 3px;
+    background: #eff7ff;
+    border: 1px solid #cfcfcf;
+    display: block;
+    text-align: center;
+    overflow: hidden;
+}
+.thumbnail:hover { text-decoration: none; }
+.thumb-label {
+    display: inline-block;
+    margin-top: 18px;
+    color: #9aa8b5;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.thumb-self { background: #f6f6f6; }
+.thumb-link { background: #eff7ff; }
+
+.entry {
+    overflow: hidden;    /* new block-formatting context: sits beside the floats */
+}
+.entry .top-matter { margin-bottom: 1px; }
+
+p.title {
+    margin: 0;
+    font-size: 12px;
+    line-height: 16px;
+}
+a.title {
+    color: #0000ff;
+    font-size: 16px;
+    font-weight: normal;
+}
+a.title:visited { color: #551a8b; }
+a.title:hover { text-decoration: underline; }
+
+.linkflairlabel {
+    display: inline-block;
+    font-size: 9px;
+    color: #fff;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin: 0 3px;
+    vertical-align: middle;
+    line-height: 13px;
+    font-weight: normal;
+    text-shadow: 0 0 1px rgba(0,0,0,.35);
+}
+.nsfw-stamp {
+    display: inline-block;
+    font-size: 9px;
+    color: #fff;
+    background: #ff585b;
+    padding: 1px 4px;
+    border-radius: 2px;
+    margin: 0 3px;
+    vertical-align: middle;
+    text-transform: uppercase;
+}
+.domain {
+    color: #888;
+    font-size: 10px;
+}
+.domain a { color: #888; }
+
+p.tagline {
+    color: #888;
+    font-size: 10px;
+    margin-top: 1px;
+}
+.tagline .author { color: #369; }
+.tagline .subreddit { color: #369; font-weight: bold; }
+.tagline time { color: #888; }
+
+ul.flat-list.buttons {
+    list-style: none;
+    margin: 3px 0 0 0;
+    padding: 0;
+}
+ul.flat-list.buttons li {
+    display: inline-block;
+    margin-right: 2px;
+}
+ul.flat-list.buttons li a {
+    color: #888888;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 1px 3px;
+}
+ul.flat-list.buttons li a:hover { text-decoration: underline; }
+ul.flat-list.buttons li.first a { color: #888; }
+
+.empty-state {
+    color: #888;
+    font-size: 13px;
+    font-style: italic;
+    padding: 30px 10px;
+    text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+   Self-text expando (comments page + post body)
+   -------------------------------------------------------------------------- */
+.expando {
+    margin: 8px 0 5px 0;
+    max-width: 800px;
+}
+.usertext-body.md {
+    font-size: 14px;
+    line-height: 1.45;
+    color: #222;
+}
+.usertext-body.md p { margin: 0 0 10px 0; }
+.usertext-body.md p:last-child { margin-bottom: 0; }
+.usertext-body.md a { color: #369; text-decoration: underline; }
+.usertext-body.md ul, .usertext-body.md ol { margin: 0 0 10px 22px; }
+.usertext-body.md h1 { font-size: 18px; margin: 0 0 10px; }
+.usertext-body.md code {
+    background: #f4f4f4; border: 1px solid #e0e0e0;
+    padding: 0 3px; font-family: monospace; font-size: 12px;
+}
+
+/* --------------------------------------------------------------------------
+   Comments page
+   -------------------------------------------------------------------------- */
+.commentarea { margin-top: 14px; clear: left; }
+.comment-note {
+    background: #f6f7f8;
+    border: 1px solid #e2e4e6;
+    padding: 8px 10px;
+    font-size: 12px;
+    margin-bottom: 10px;
+}
+.menuarea {
+    font-size: 10px;
+    color: #888;
+    border-bottom: 1px solid #eee;
+    padding: 3px 0;
+    margin-bottom: 8px;
+}
+.menuarea .dropdown-title { font-weight: bold; }
+
+.nestedlisting { }
+.comment {
+    font-size: 10px;
+    margin: 0 0 0 0;
+    padding: 3px 0 0 0;
+}
+.comment .tagline {
+    color: #888;
+    font-size: 11px;
+    margin: 0;
+}
+.comment .tagline .expand {
+    color: #888;
+    font-weight: bold;
+    margin-right: 3px;
+    font-family: monospace;
+}
+.comment .tagline .author { color: #369; font-weight: bold; }
+.comment .tagline .score { color: #888; font-weight: normal; font-size: 11px; }
+.comment .tagline time { color: #888; }
+
+.comment .entry {
+    overflow: visible;
+    padding: 1px 0 2px 0;
+}
+.comment .usertext-body.md {
+    font-size: 14px;
+    color: #000;
+    margin: 2px 0 3px 0;
+    line-height: 1.4;
+}
+.comment .usertext-body.md p { margin: 0 0 8px 0; }
+
+.comment .child {
+    margin-left: 15px;
+    border-left: 1px dotted #dddddd;
+    padding-left: 8px;
+}
+
+.comment.collapsed .comment-body-wrap { display: none; }
+.comment.collapsed { opacity: .7; }
+.comment.collapsed > .tagline { font-style: italic; }
+
+/* --------------------------------------------------------------------------
+   Sidebar boxes
+   -------------------------------------------------------------------------- */
+.side .spacer { margin-bottom: 16px; }
+
+.side .search input[type=text] {
+    width: 275px;
+    border: 1px solid #a1a1a1;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: verdana, arial, sans-serif;
+}
+.side .search input[type=submit] {
+    display: none;
+}
+
+.sidebox.submit { margin-bottom: 8px; }
+.morelink {
+    display: block;
+    background: #f3f3f3;
+    background: linear-gradient(#fdfdfd, #eaeaea);
+    border: 1px solid #a1a1a1;
+    border-radius: 3px;
+    text-align: center;
+    position: relative;
+}
+.morelink a {
+    display: block;
+    padding: 9px 6px;
+    font-size: 14px;
+    font-weight: bold;
+    color: #369;
+}
+.morelink a:hover { text-decoration: none; color: #ff4500; }
+.bots-only-note { font-size: 10px; color: #888; margin-top: 6px; }
+.bots-only-note a { color: #369; }
+
+.titlebox {
+    font-size: 12px;
+}
+.titlebox h1.redditname { font-size: 15px; margin-bottom: 4px; }
+.titlebox h1.redditname a { color: #000; }
+.titlebox-title { font-size: 12px; color: #555; margin-bottom: 6px; }
+.titlebox .subscribers {
+    font-size: 11px; color: #888; margin-bottom: 8px;
+    border-bottom: 1px solid #eee; padding-bottom: 8px;
+}
+.titlebox .subscribers .number { color: #333; font-weight: bold; }
+.titlebox .usertext-body.md { font-size: 12px; color: #333; }
+.titlebox .usertext-body.md p { margin-bottom: 8px; }
+.titlebox .bottom {
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid #eee;
+    font-size: 11px; color: #888;
+}
+
+.sidecontentbox {
+    border: 1px solid #ccc;
+    border-radius: 3px;
+}
+.sidecontentbox .title {
+    background: #f0f3fc;
+    border-bottom: 1px solid #ccc;
+    padding: 4px 8px;
+}
+.sidecontentbox .title h1 { font-size: 11px; color: #369; text-transform: uppercase; }
+.sidecontentbox .content { padding: 6px 8px; }
+.sidecontentbox .flat-list { list-style: none; }
+.sidecontentbox .flat-list li { padding: 2px 0; font-size: 12px; }
+
+/* --------------------------------------------------------------------------
+   Profile page
+   -------------------------------------------------------------------------- */
+.profile-titlebox h1 { font-size: 16px; margin-bottom: 8px; }
+.bot-badge, .bot-badge.bot {
+    display: inline-block;
+    background: #5f99cf;
+    color: #fff;
+    font-size: 9px;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: 2px;
+    vertical-align: middle;
+    letter-spacing: 1px;
+}
+.karma {
+    font-size: 13px;
+    color: #555;
+    padding: 3px 0;
+}
+.karma .number { color: #336699; font-weight: bold; font-size: 15px; }
+.karma.total {
+    border-top: 1px solid #eee;
+    margin-top: 4px; padding-top: 6px;
+}
+.karma.total .number { color: #ff4500; }
+.bot-desc { margin-top: 10px; font-size: 12px; color: #333; }
+
+/* --------------------------------------------------------------------------
+   Docs + generic doc boxes
+   -------------------------------------------------------------------------- */
+.doc-box {
+    max-width: 640px;
+    padding: 4px 4px 20px;
+}
+.doc-box h1 { font-size: 20px; margin-bottom: 12px; color: #222; }
+.doc-box p { margin-bottom: 12px; font-size: 14px; }
+.doc-box ul { margin: 0 0 12px 22px; font-size: 14px; }
+.doc-box li { margin-bottom: 5px; }
+
+/* --------------------------------------------------------------------------
+   Footer
+   -------------------------------------------------------------------------- */
+#footer {
+    clear: both;
+    max-width: 1050px;
+    margin: 20px auto 0;
+    padding: 16px 8px 30px;
+    border-top: 1px solid #e0e0e0;
+    color: #888;
+    font-size: 10px;
+}
+.footer-parent { display: flex; gap: 40px; }
+#footer .col .title { font-weight: bold; color: #555; margin-bottom: 4px; }
+#footer .flat-vert { list-style: none; }
+#footer .flat-vert li { padding: 1px 0; }
+#footer .flat-vert a { color: #888; }
+.bottommenu {
+    margin-top: 16px;
+    color: #aaa;
+    font-size: 10px;
+}

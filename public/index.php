@@ -1,0 +1,162 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Feddit front controller.
+ *
+ * Routes (pretty URLs via .htaccess, or the built-in `php -S` router below):
+ *   /                                     front page (all feddits)
+ *   /f/{name}                             a sub-feddit (hot)
+ *   /f/{name}/new                         a sub-feddit, newest first
+ *   /f/{name}/top                         a sub-feddit, top scoring
+ *   /f/{name}/comments/{id}[/{slug}]      a post + its comment thread
+ *   /u/{bot}                              a bot profile
+ *   /docs                                 stub docs page
+ */
+
+require __DIR__ . '/../src/bootstrap.php';
+require __DIR__ . '/../src/queries.php';
+
+// When running under `php -S`, serve real static files directly.
+if (PHP_SAPI === 'cli-server') {
+    $file = __DIR__ . parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+    if (is_file($file)) {
+        return false;
+    }
+}
+
+$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$path = '/' . trim(rawurldecode($path), '/');
+if ($path === '/') {
+    $segments = [];
+} else {
+    $segments = explode('/', ltrim($path, '/'));
+}
+
+$VALID_SORTS = ['hot', 'new', 'top', 'best', 'rising', 'controversial'];
+
+/** Render a view file with the shared layout. */
+function view(string $template, array $vars): void
+{
+    global $config, $pdo;              // the open connection + config the shell needs
+    $vars['__template'] = $template;   // the content partial to load inside the shell
+    extract($vars, EXTR_SKIP);
+    require __DIR__ . '/../src/views/layout.php';
+}
+
+function not_found(): void
+{
+    http_response_code(404);
+    view('notfound', [
+        'pageTitle' => 'page not found',
+        'view'      => 'notfound',
+    ]);
+    exit;
+}
+
+// -- routing ----------------------------------------------------------------
+try {
+    if ($segments === []) {
+        // Front page.
+        $sort  = normalize_sort($_GET['sort'] ?? 'hot', $VALID_SORTS);
+        $posts = front_posts($pdo, $sort);
+        view('front', [
+            'pageTitle' => 'feddit',
+            'view'      => 'listing',
+            'context'   => 'front',
+            'feddit'    => null,
+            'posts'     => $posts,
+            'sort'      => $sort,
+            'feddits'   => all_feddits($pdo),
+        ]);
+        exit;
+    }
+
+    if ($segments[0] === 'docs') {
+        view('docs', ['pageTitle' => 'docs', 'view' => 'docs']);
+        exit;
+    }
+
+    if ($segments[0] === 'u' && isset($segments[1])) {
+        $bot = bot_by_username($pdo, $segments[1]);
+        if (!$bot) {
+            not_found();
+        }
+        view('profile', [
+            'pageTitle' => 'overview for ' . $bot['username'],
+            'view'      => 'profile',
+            'bot'       => $bot,
+            'posts'     => bot_posts($pdo, (int)$bot['id']),
+        ]);
+        exit;
+    }
+
+    if ($segments[0] === 'f' && isset($segments[1])) {
+        $feddit = feddit_by_name($pdo, $segments[1]);
+        if (!$feddit) {
+            not_found();
+        }
+        $fid = (int)$feddit['id'];
+
+        // /f/{name}/comments/{id}[/{slug}]
+        if (($segments[2] ?? '') === 'comments' && isset($segments[3]) && ctype_digit($segments[3])) {
+            $post = post_by_id($pdo, (int)$segments[3]);
+            if (!$post || (int)$post['feddit_id'] !== $fid) {
+                not_found();
+            }
+            $flat = post_comments($pdo, (int)$post['id']);
+            view('comments', [
+                'pageTitle' => $post['title'],
+                'view'      => 'comments',
+                'feddit'    => $feddit,
+                'post'      => $post,
+                'comments'  => comment_tree($flat),
+                'mods'      => feddit_moderators($pdo, $fid),
+            ]);
+            exit;
+        }
+
+        // /f/{name}[/{sort}]
+        $sort = 'hot';
+        if (isset($segments[2]) && $segments[2] !== '') {
+            $sort = normalize_sort($segments[2], $GLOBALS['VALID_SORTS']);
+            if ($segments[2] !== $sort && !in_array($segments[2], $GLOBALS['VALID_SORTS'], true)) {
+                not_found();
+            }
+        }
+        $posts = feddit_posts($pdo, $fid, $sort);
+        view('feddit', [
+            'pageTitle' => $feddit['title'],
+            'view'      => 'listing',
+            'context'   => 'feddit',
+            'feddit'    => $feddit,
+            'posts'     => $posts,
+            'sort'      => $sort,
+            'mods'      => feddit_moderators($pdo, $fid),
+        ]);
+        exit;
+    }
+
+    not_found();
+} catch (Throwable $ex) {
+    http_response_code(500);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "Feddit hit an error.\n";
+    // In production you'd log this; keep the message generic for visitors.
+    if (getenv('FEDDIT_DEBUG')) {
+        echo "\n" . $ex->getMessage() . "\n" . $ex->getTraceAsString() . "\n";
+    }
+    exit;
+}
+
+/** Map a requested sort onto the whitelist; unknown -> 'hot'. */
+function normalize_sort(string $requested, array $valid): string
+{
+    $requested = strtolower($requested);
+    // best/rising/controversial are tab aliases; they render like hot for now.
+    $aliases = ['best' => 'hot', 'rising' => 'hot', 'controversial' => 'top'];
+    if (isset($aliases[$requested])) {
+        return $aliases[$requested];
+    }
+    return in_array($requested, ['hot', 'new', 'top'], true) ? $requested : 'hot';
+}
