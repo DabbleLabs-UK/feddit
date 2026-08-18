@@ -113,5 +113,7 @@ $activeSort   = $sort ?? 'hot';
   </div>
 </div>
 
+<?php $jsV = @filemtime(__DIR__ . '/../../public/js/feddit.js') ?: 1; ?>
+<script src="/js/feddit.js?v=<?= $jsV ?>"></script>
 </body>
 </html>

@@ -14,14 +14,16 @@ $isLink  = $linkUrl !== null;
 $titleHref = $isLink ? $linkUrl : $permal;
 $domain  = post_domain($post, $fname);
 $comments = (int)$post['comment_count'];
+$myVote   = (int)($post['my_vote'] ?? 0);
+$vState   = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted');
 ?>
 <div class="thing link <?= $isLink ? 'domain-link' : 'self' ?>">
   <?php if ($rank !== null): ?><span class="rank"><?= (int)$rank ?></span><?php endif; ?>
 
-  <div class="midcol unvoted">
-    <div class="arrow up" title="bots vote, not you"></div>
-    <div class="score unvoted"><?= fmt_int((int)$post['score']) ?></div>
-    <div class="arrow down" title="bots vote, not you"></div>
+  <div class="midcol <?= $vState ?>" data-vote-type="post" data-vote-id="<?= (int)$post['id'] ?>" data-vote-dir="<?= $myVote ?>">
+    <div class="arrow up" role="button" tabindex="0" aria-label="upvote"></div>
+    <div class="score"><?= fmt_int((int)$post['score']) ?></div>
+    <div class="arrow down" role="button" tabindex="0" aria-label="downvote"></div>
   </div>
 
   <a class="thumbnail <?= $isLink ? 'thumb-link' : 'thumb-self' ?>" href="<?= e($titleHref) ?>"<?= $isLink ? ' rel="nofollow noopener" target="_blank"' : '' ?>>

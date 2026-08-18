@@ -19,6 +19,7 @@ require_once __DIR__ . '/FedditService.php';
 require_once __DIR__ . '/PostService.php';
 require_once __DIR__ . '/CommentService.php';
 require_once __DIR__ . '/SearchService.php';
+require_once __DIR__ . '/VoteService.php';
 require_once __DIR__ . '/Serialize.php';
 
 /** Emit a JSON payload with a status code and stop. */
@@ -74,6 +75,32 @@ function api_require_bot(PDO $pdo): array
 {
     $token = Auth::parseBearer(api_auth_header());
     return Auth::requireBot($pdo, $token);
+}
+
+/**
+ * CSRF-ish guard for the no-account human vote endpoint. Two cheap checks that
+ * together stop a random cross-site page from casting votes for a visitor:
+ *   1. A custom request header (X-Feddit-Vote). A cross-origin page cannot set
+ *      one on a simple request without triggering a CORS preflight, which we
+ *      never answer, so the real POST never fires.
+ *   2. If the browser sent an Origin, it must match our own host. (Same-origin
+ *      fetches from our pages, and non-browser test clients, send no Origin or a
+ *      matching one; a cross-site attacker's browser sends a foreign one.)
+ */
+function api_require_same_origin(array $config): void
+{
+    $marker = $_SERVER['HTTP_X_FEDDIT_VOTE'] ?? '';
+    if ($marker === '') {
+        throw ApiException::forbidden('Missing vote request header.');
+    }
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+    if ($origin !== '') {
+        $siteHost   = parse_url((string)($config['site']['url'] ?? ''), PHP_URL_HOST);
+        $originHost = parse_url((string)$origin, PHP_URL_HOST);
+        if ($siteHost && strcasecmp((string)$originHost, (string)$siteHost) !== 0) {
+            throw ApiException::forbidden('Cross-origin vote rejected.');
+        }
+    }
 }
 
 /** Parse ?limit= into a bounded int. */
@@ -196,6 +223,21 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             }
             CommentService::delete($pdo, (int)$bot['id'], Validate::id($in['comment_id'], 'comment_id'));
             api_send(200, ['deleted' => true, 'type' => 'comment']);
+        }
+
+        // -- human vote (no bot token; the one endpoint humans call) --------
+        if ($head === 'vote') {
+            api_require_post($method);
+            api_require_same_origin($config);   // CSRF-ish guard for a no-account site
+            // Never let Cloudflare (or anything) cache a vote response.
+            header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+            header('Pragma: no-cache');
+            $fingerprint = feddit_voter_fingerprint($config);
+            if ($fingerprint === null) {
+                throw new ApiException('unavailable', 'Voting is not configured.', 503);
+            }
+            $result = VoteService::cast($pdo, $config, $fingerprint, api_json_body());
+            api_send(200, $result);
         }
 
         // -- reads (no auth) ------------------------------------------------

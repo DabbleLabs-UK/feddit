@@ -227,6 +227,13 @@ img { border: 0; }
 .arrow.up:hover { border-bottom-color: #ff4500; }
 .arrow.down:hover { border-top-color: #5f99cf; }
 
+/* human vote states, matching old.reddit: upvote orange, downvote periwinkle.
+   The state class rides on the .midcol wrapper; the score recolours with it. */
+.midcol.upvoted .arrow.up     { border-bottom-color: #ff4500; }
+.midcol.downvoted .arrow.down { border-top-color: #9494ff; }
+.midcol.upvoted .score        { color: #ff4500; }
+.midcol.downvoted .score      { color: #9494ff; }
+
 .thumbnail {
     float: left;
     width: 70px;
@@ -422,6 +429,13 @@ ul.flat-list.buttons li.first a { color: #888; }
 }
 .comment .midcol-c .arrow.up:hover { border-bottom-color: #ff4500; }
 .comment .midcol-c .arrow.down:hover { border-top-color: #5f99cf; }
+
+/* comment vote states: the class rides on .thing.comment (the score lives in the
+   tagline, not the midcol), scoped with > so nested replies don't inherit it. */
+.thing.comment.upvoted > .midcol-c .arrow.up     { border-bottom-color: #ff4500; }
+.thing.comment.downvoted > .midcol-c .arrow.down { border-top-color: #9494ff; }
+.thing.comment.upvoted > .entry > .tagline .score   { color: #ff4500; }
+.thing.comment.downvoted > .entry > .tagline .score { color: #9494ff; }
 
 .comment .entry {
     overflow: hidden;    /* sit beside the floated arrows */

@@ -5,18 +5,20 @@
  */
 declare(strict_types=1);
 
-$score = (int)$comment['score'];
+$score  = (int)$comment['score'];
+$myVote = (int)($comment['my_vote'] ?? 0);
+$vState = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted');
 ?>
-<div class="thing comment" id="comment-<?= (int)$comment['id'] ?>">
-  <div class="midcol-c unvoted">
-    <div class="arrow up" title="bots vote, not you"></div>
-    <div class="arrow down" title="bots vote, not you"></div>
+<div class="thing comment <?= $vState ?>" id="comment-<?= (int)$comment['id'] ?>">
+  <div class="midcol-c" data-vote-type="comment" data-vote-id="<?= (int)$comment['id'] ?>" data-vote-dir="<?= $myVote ?>">
+    <div class="arrow up" role="button" tabindex="0" aria-label="upvote"></div>
+    <div class="arrow down" role="button" tabindex="0" aria-label="downvote"></div>
   </div>
   <div class="entry">
     <p class="tagline">
       <a href="#" class="expand" onclick="return feddit_collapse(this);">[&ndash;]</a>
       <a class="author" href="/u/<?= e($comment['bot_username']) ?>"><?= e($comment['bot_username']) ?></a>
-      <span class="score unvoted"><?= fmt_int($score) ?> point<?= $score === 1 ? '' : 's' ?></span>
+      <span class="score"><?= fmt_int($score) ?> point<?= $score === 1 ? '' : 's' ?></span>
       <time title="<?= e($comment['created_at']) ?>"><?= e(time_ago($comment['created_at'])) ?></time>
     </p>
     <div class="comment-body-wrap">

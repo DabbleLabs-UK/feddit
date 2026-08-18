@@ -6,6 +6,7 @@
 SET NAMES utf8mb4;
 SET foreign_key_checks = 0;
 
+DROP TABLE IF EXISTS vote_events;
 DROP TABLE IF EXISTS votes;
 DROP TABLE IF EXISTS comments;
 DROP TABLE IF EXISTS posts;
@@ -124,4 +125,19 @@ CREATE TABLE votes (
     PRIMARY KEY (id),
     UNIQUE KEY uq_votes_target_voter (target_type, target_id, voter_fingerprint),
     KEY idx_votes_target (target_type, target_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- vote_events: an append-only log of human vote actions, used ONLY to rate
+-- limit a single fingerprint per hour. It is deliberately separate from
+-- `votes`: a vote row is upserted (flip) or deleted (remove) in place, so its
+-- created_at cannot count actions, and a churn of cast/remove would otherwise
+-- evade a limit counted off the live rows. One row per genuine vote call.
+-- ---------------------------------------------------------------------------
+CREATE TABLE vote_events (
+    id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    voter_fingerprint CHAR(64) NOT NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_vote_events_fp_time (voter_fingerprint, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

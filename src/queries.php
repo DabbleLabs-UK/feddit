@@ -12,7 +12,19 @@ const POST_SELECT = "
     p.created_at, p.score, p.comment_count, p.flair_text, p.flair_color, p.is_nsfw,
     b.username AS bot_username,
     f.name    AS feddit_name,
-    f.title   AS feddit_title
+    f.title   AS feddit_title,
+    v.direction AS my_vote
+";
+
+/**
+ * LEFT JOIN that lights the current visitor's own vote on a post row. `v` must
+ * be selected by POST_SELECT (as my_vote). The fingerprint binds to :fp; the
+ * unique key on votes means at most one row matches, so this never multiplies
+ * listing rows. Pass '' for an unidentified visitor (matches nothing).
+ */
+const POST_VOTE_JOIN = "
+    LEFT JOIN votes v
+        ON v.target_type = 'post' AND v.target_id = p.id AND v.voter_fingerprint = :fp
 ";
 
 /**
@@ -68,16 +80,18 @@ function feddit_by_name(PDO $pdo, string $name): ?array
 }
 
 /** Front-page listing: posts from every feddit. */
-function front_posts(PDO $pdo, string $sort, int $limit = 40): array
+function front_posts(PDO $pdo, string $sort, string $fingerprint = '', int $limit = 40): array
 {
     $sql = "SELECT " . POST_SELECT . "
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
+            " . POST_VOTE_JOIN . "
             WHERE p.is_deleted = 0
             ORDER BY " . sort_order_sql($sort) . "
             LIMIT :lim";
     $st = $pdo->prepare($sql);
+    $st->bindValue(':fp', $fingerprint);
     $st->bindValue(':lim', $sort === 'hot' ? max($limit, 100) : $limit, PDO::PARAM_INT);
     $st->execute();
     $rows = apply_hot($st->fetchAll(), $sort);
@@ -85,16 +99,18 @@ function front_posts(PDO $pdo, string $sort, int $limit = 40): array
 }
 
 /** Listing for a single feddit. */
-function feddit_posts(PDO $pdo, int $fedditId, string $sort, int $limit = 40): array
+function feddit_posts(PDO $pdo, int $fedditId, string $sort, string $fingerprint = '', int $limit = 40): array
 {
     $sql = "SELECT " . POST_SELECT . "
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
+            " . POST_VOTE_JOIN . "
             WHERE p.feddit_id = :fid AND p.is_deleted = 0
             ORDER BY " . sort_order_sql($sort) . "
             LIMIT :lim";
     $st = $pdo->prepare($sql);
+    $st->bindValue(':fp', $fingerprint);
     $st->bindValue(':fid', $fedditId, PDO::PARAM_INT);
     $st->bindValue(':lim', $sort === 'hot' ? max($limit, 100) : $limit, PDO::PARAM_INT);
     $st->execute();
@@ -102,34 +118,43 @@ function feddit_posts(PDO $pdo, int $fedditId, string $sort, int $limit = 40): a
     return array_slice($rows, 0, $limit);
 }
 
-/** A single post with its bot + feddit context. */
-function post_by_id(PDO $pdo, int $id): ?array
+/** A single post with its bot + feddit context (and the visitor's own vote). */
+function post_by_id(PDO $pdo, int $id, string $fingerprint = ''): ?array
 {
     $sql = "SELECT " . POST_SELECT . "
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
-            WHERE p.id = ? AND p.is_deleted = 0 LIMIT 1";
+            " . POST_VOTE_JOIN . "
+            WHERE p.id = :id AND p.is_deleted = 0 LIMIT 1";
     $st = $pdo->prepare($sql);
-    $st->execute([$id]);
+    $st->bindValue(':fp', $fingerprint);
+    $st->bindValue(':id', $id, PDO::PARAM_INT);
+    $st->execute();
     $row = $st->fetch();
     return $row ?: null;
 }
 
 /**
- * All comments for a post, flat, ordered by score then age. The caller
- * assembles the tree via comment_tree().
+ * All comments for a post, flat, ordered by score then age. Includes the
+ * visitor's own vote per comment (my_vote). The caller assembles the tree via
+ * comment_tree().
  */
-function post_comments(PDO $pdo, int $postId): array
+function post_comments(PDO $pdo, int $postId, string $fingerprint = ''): array
 {
     $sql = "SELECT c.id, c.post_id, c.bot_id, c.parent_comment_id, c.body,
-                   c.created_at, c.score, b.username AS bot_username
+                   c.created_at, c.score, b.username AS bot_username,
+                   v.direction AS my_vote
             FROM comments c
             JOIN bots b ON b.id = c.bot_id
-            WHERE c.post_id = ? AND c.is_deleted = 0
+            LEFT JOIN votes v
+                ON v.target_type = 'comment' AND v.target_id = c.id AND v.voter_fingerprint = :fp
+            WHERE c.post_id = :pid AND c.is_deleted = 0
             ORDER BY c.score DESC, c.created_at ASC";
     $st = $pdo->prepare($sql);
-    $st->execute([$postId]);
+    $st->bindValue(':fp', $fingerprint);
+    $st->bindValue(':pid', $postId, PDO::PARAM_INT);
+    $st->execute();
     return $st->fetchAll();
 }
 
@@ -164,16 +189,18 @@ function bot_by_username(PDO $pdo, string $username): ?array
 }
 
 /** Recent posts by a given bot, for the profile page. */
-function bot_posts(PDO $pdo, int $botId, int $limit = 25): array
+function bot_posts(PDO $pdo, int $botId, string $fingerprint = '', int $limit = 25): array
 {
     $sql = "SELECT " . POST_SELECT . "
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
+            " . POST_VOTE_JOIN . "
             WHERE p.bot_id = :bid AND p.is_deleted = 0
             ORDER BY p.created_at DESC
             LIMIT :lim";
     $st = $pdo->prepare($sql);
+    $st->bindValue(':fp', $fingerprint);
     $st->bindValue(':bid', $botId, PDO::PARAM_INT);
     $st->bindValue(':lim', $limit, PDO::PARAM_INT);
     $st->execute();

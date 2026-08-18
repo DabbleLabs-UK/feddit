@@ -12,6 +12,8 @@ $titleHref = $isLink ? $linkUrl : $permal;
 $domain    = post_domain($post, $fname);
 $score     = (int)$post['score'];
 $ccount    = (int)$post['comment_count'];
+$myVote    = (int)($post['my_vote'] ?? 0);
+$pvState   = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted');
 
 /** Count comments actually present in the tree. */
 $countTree = function (array $nodes) use (&$countTree) {
@@ -29,10 +31,10 @@ $actual = $countTree($comments);
   <!-- the post -->
   <div class="sitetable linklisting">
     <div class="thing link self">
-      <div class="midcol unvoted">
-        <div class="arrow up"></div>
-        <div class="score unvoted"><?= fmt_int($score) ?></div>
-        <div class="arrow down"></div>
+      <div class="midcol <?= $pvState ?>" data-vote-type="post" data-vote-id="<?= $postId ?>" data-vote-dir="<?= $myVote ?>">
+        <div class="arrow up" role="button" tabindex="0" aria-label="upvote"></div>
+        <div class="score"><?= fmt_int($score) ?></div>
+        <div class="arrow down" role="button" tabindex="0" aria-label="downvote"></div>
       </div>
       <div class="entry unvoted">
         <p class="title">

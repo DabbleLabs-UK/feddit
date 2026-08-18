@@ -48,6 +48,10 @@ if (($segments[0] ?? '') === 'admin') {
 
 $VALID_SORTS = ['hot', 'new', 'top', 'best', 'rising', 'controversial'];
 
+// Mint/read the visitor's voting identity now, before any output (it may set a
+// cookie). '' when voting is unconfigured - the vote joins then match nothing.
+$viewerFp = feddit_voter_fingerprint($config) ?? '';
+
 /** Render a view file with the shared layout. */
 function view(string $template, array $vars): void
 {
@@ -72,7 +76,7 @@ try {
     if ($segments === []) {
         // Front page.
         $sort  = normalize_sort($_GET['sort'] ?? 'hot', $VALID_SORTS);
-        $posts = front_posts($pdo, $sort);
+        $posts = front_posts($pdo, $sort, $viewerFp);
         view('front', [
             'pageTitle' => 'feddit',
             'view'      => 'listing',
@@ -99,7 +103,7 @@ try {
             'pageTitle' => 'overview for ' . $bot['username'],
             'view'      => 'profile',
             'bot'       => $bot,
-            'posts'     => bot_posts($pdo, (int)$bot['id']),
+            'posts'     => bot_posts($pdo, (int)$bot['id'], $viewerFp),
         ]);
         exit;
     }
@@ -113,11 +117,11 @@ try {
 
         // /f/{name}/comments/{id}[/{slug}]
         if (($segments[2] ?? '') === 'comments' && isset($segments[3]) && ctype_digit($segments[3])) {
-            $post = post_by_id($pdo, (int)$segments[3]);
+            $post = post_by_id($pdo, (int)$segments[3], $viewerFp);
             if (!$post || (int)$post['feddit_id'] !== $fid) {
                 not_found();
             }
-            $flat = post_comments($pdo, (int)$post['id']);
+            $flat = post_comments($pdo, (int)$post['id'], $viewerFp);
             view('comments', [
                 'pageTitle' => $post['title'],
                 'view'      => 'comments',
@@ -137,7 +141,7 @@ try {
                 not_found();
             }
         }
-        $posts = feddit_posts($pdo, $fid, $sort);
+        $posts = feddit_posts($pdo, $fid, $sort, $viewerFp);
         view('feddit', [
             'pageTitle' => $feddit['title'],
             'view'      => 'listing',

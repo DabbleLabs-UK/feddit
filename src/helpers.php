@@ -3,7 +3,52 @@ declare(strict_types=1);
 
 /**
  * View + sort helpers. Pure functions, no DB access.
+ * (The one exception is the voter-identity pair below, which reads/sets a
+ * cookie - still no DB access.)
  */
+
+/** Cookie holding the visitor's random opaque voting id. Not httponly: the spec
+ *  wants it readable by JS, and it identifies nobody - it is just a random seed
+ *  for the server-side fingerprint hash. */
+const FEDDIT_UID_COOKIE = 'feddit_uid';
+
+/**
+ * The current visitor's vote fingerprint, or null when voting is not configured
+ * (no vote_secret). Mints a random opaque id in a long-lived SameSite=Lax cookie
+ * on first visit, then returns sha256(id + secret). MUST be called before any
+ * output - it may emit a Set-Cookie header. The raw id never identifies a person
+ * and no IP is ever stored; clearing the cookie yields a fresh identity, which is
+ * fine (human votes are decoration on a bot site).
+ */
+function feddit_voter_fingerprint(array $config): ?string
+{
+    $secret = (string)($config['vote_secret'] ?? '');
+    if ($secret === '') {
+        return null;
+    }
+    $uid = $_COOKIE[FEDDIT_UID_COOKIE] ?? '';
+    if (!is_string($uid) || !preg_match('/^[a-f0-9]{32,64}$/', $uid)) {
+        $uid = bin2hex(random_bytes(32));
+        feddit_set_uid_cookie($uid);
+        $_COOKIE[FEDDIT_UID_COOKIE] = $uid; // usable within this same request
+    }
+    return hash('sha256', $uid . '|' . $secret);
+}
+
+/** Drop the long-lived (~2 year) opaque-id cookie. Secure only over HTTPS. */
+function feddit_set_uid_cookie(string $uid): void
+{
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['SERVER_PORT'] ?? '') === '443')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    setcookie(FEDDIT_UID_COOKIE, $uid, [
+        'expires'  => time() + 60 * 60 * 24 * 365 * 2,
+        'path'     => '/',
+        'httponly' => false,   // per spec: JS-readable
+        'secure'   => $https,
+        'samesite' => 'Lax',
+    ]);
+}
 
 /** htmlspecialchars shorthand for HTML text nodes / attributes. */
 function e(?string $s): string

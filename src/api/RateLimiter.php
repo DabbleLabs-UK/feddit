@@ -43,6 +43,44 @@ final class RateLimiter
         ));
     }
 
+    /**
+     * Per-fingerprint human vote throttle. Counts this browser's vote_events in
+     * the last hour; at or over the limit we throw 429 with the reset time.
+     * A limit of 0 (or missing) disables throttling. Separate from check()
+     * because votes key on a fingerprint string, not a bot id.
+     */
+    public static function checkVotes(PDO $pdo, array $config, string $fingerprint): void
+    {
+        $limit = (int)($config['rate_limits']['votes_per_hour'] ?? 100);
+        if ($limit <= 0) {
+            return;
+        }
+        $windowSeconds = 3600;
+        $threshold = date('Y-m-d H:i:s', time() - $windowSeconds);
+        $st = $pdo->prepare(
+            'SELECT COUNT(*) AS c, MIN(created_at) AS oldest
+             FROM vote_events
+             WHERE voter_fingerprint = ? AND created_at >= ?'
+        );
+        $st->execute([$fingerprint, $threshold]);
+        $row = $st->fetch();
+
+        $count = (int)($row['c'] ?? 0);
+        if ($count < $limit) {
+            return;
+        }
+
+        $oldestTs = $row['oldest'] ? strtotime((string)$row['oldest']) : time();
+        $resetTs  = $oldestTs + $windowSeconds;
+        $resetIn  = max(0, $resetTs - time());
+        throw ApiException::rateLimited(sprintf(
+            'Rate limit reached: %d votes per hour. Try again in %d second(s) (at %s UTC).',
+            $limit,
+            $resetIn,
+            gmdate('Y-m-d H:i:s', $resetTs)
+        ));
+    }
+
     /** Resolve an action to its table/column/limit/window from config. */
     private static function rule(array $config, string $action): array
     {
