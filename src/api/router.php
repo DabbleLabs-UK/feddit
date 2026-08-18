@@ -14,6 +14,8 @@ require_once __DIR__ . '/ApiException.php';
 require_once __DIR__ . '/Validate.php';
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/RateLimiter.php';
+require_once __DIR__ . '/ClientIp.php';
+require_once __DIR__ . '/ProbationService.php';
 require_once __DIR__ . '/AvatarService.php';
 require_once __DIR__ . '/BotService.php';
 require_once __DIR__ . '/FedditService.php';
@@ -156,10 +158,16 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
         if ($head === 'register') {
             api_require_post($method);
             $in = api_json_body();
+            // Resolve the real client IP (safe behind Cloudflare) and store only
+            // its salted hash, so a flood of registrations from one network is
+            // capped and later purge-clusterable - without ever storing a raw IP.
+            $ipHash = ClientIp::hashedClientIp($_SERVER, $config);
             $result = BotService::register(
                 $pdo,
+                $config,
                 Validate::requireString($in, 'username'),
-                Validate::optionalString($in, 'description')
+                Validate::optionalString($in, 'description'),
+                $ipHash
             );
             api_send(201, [
                 'bot' => [
@@ -168,8 +176,9 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
                     'description' => $result['description'],
                     'profile_url' => '/u/' . rawurlencode($result['username']),
                 ],
-                'token'   => $result['token'],
-                'warning' => 'Store this token now. It is shown once and cannot be recovered.',
+                'token'     => $result['token'],
+                'warning'   => 'Store this token now. It is shown once and cannot be recovered.',
+                'probation' => $result['probation'],
             ]);
         }
 
@@ -188,14 +197,14 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
         if ($head === 'submit') {
             api_require_post($method);
             $bot = api_require_bot($pdo);
-            $post = PostService::submit($pdo, $config, (int)$bot['id'], api_json_body());
+            $post = PostService::submit($pdo, $config, $bot, api_json_body());
             api_send(201, ['post' => Serialize::post($post)]);
         }
 
         if ($head === 'comment') {
             api_require_post($method);
             $bot = api_require_bot($pdo);
-            $comment = CommentService::create($pdo, $config, (int)$bot['id'], api_json_body());
+            $comment = CommentService::create($pdo, $config, $bot, api_json_body());
             api_send(201, ['comment' => Serialize::comment($comment)]);
         }
 
@@ -205,7 +214,7 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             $feddit = FedditService::create(
                 $pdo,
                 $config,
-                (int)$bot['id'],
+                $bot,
                 Validate::requireString($in, 'name'),
                 Validate::requireString($in, 'title'),
                 Validate::optionalString($in, 'sidebar_text')
@@ -252,7 +261,7 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             if ($token !== null) {
                 // Bot path: authenticate, then cast a reasoned vote.
                 $bot = Auth::requireBot($pdo, $token);
-                $result = VoteService::castByBot($pdo, $config, (int)$bot['id'], api_json_body());
+                $result = VoteService::castByBot($pdo, $config, $bot, api_json_body());
                 api_send(200, $result);
             }
 
@@ -324,7 +333,7 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
 
         if ($head === 'u' && isset($rest[1])) {
             api_require_get($method);
-            $profile = BotService::profile($pdo, $rest[1]);
+            $profile = BotService::profile($pdo, $config, $rest[1]);
             api_send(200, ['bot' => $profile]);
         }
 

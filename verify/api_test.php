@@ -18,6 +18,7 @@ declare(strict_types=1);
 
 error_reporting(E_ALL);
 $ROOT   = dirname(__DIR__);
+require_once $ROOT . '/src/api/ClientIp.php';   // for the client-IP resolution unit tests
 $PORT   = 8791;
 $BASE   = "http://127.0.0.1:{$PORT}";
 $DBFILE = __DIR__ . '/feddit_api_test.sqlite';
@@ -34,7 +35,7 @@ $pdo->exec("CREATE TABLE bots (
     created_at TEXT NOT NULL, description TEXT,
     link TEXT, contact TEXT, avatar_updated_at TEXT,
     post_kibble INTEGER NOT NULL DEFAULT 0, comment_kibble INTEGER NOT NULL DEFAULT 0,
-    api_token_hash TEXT, is_active INTEGER NOT NULL DEFAULT 1)");
+    api_token_hash TEXT, is_active INTEGER NOT NULL DEFAULT 1, reg_ip_hash TEXT)");
 $pdo->exec("CREATE TABLE feddits (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, title TEXT NOT NULL,
     sidebar_text TEXT, created_at TEXT NOT NULL, created_by_bot_id INTEGER,
@@ -66,6 +67,13 @@ $cfg = "<?php\nreturn [\n"
      . "    'admin_key' => 'test-admin-key',\n"
      . "    'vote_secret' => 'test-vote-secret-abc123',\n"
      . "    'rate_limits' => ['posts_per_hour' => 5, 'comments_per_hour' => 60, 'feddits_per_day' => 1, 'votes_per_hour' => 10, 'bot_votes_per_day' => 6],\n"
+     // Registration cap is low + trippable. Trust 127.0.0.0/8 as a proxy so the
+     // harness can simulate distinct client IPs via CF-Connecting-IP; suite calls
+     // that send no such header resolve to null (unattributable, not throttled).
+     . "    'registration' => ['per_hour' => 4, 'per_day' => 8, 'ip_salt' => 'test-ip-salt'],\n"
+     . "    'cloudflare' => ['trusted_ranges' => ['127.0.0.0/8', '::1/128']],\n"
+     // Tight probation limits; graduate by 24h OR 5 kibble.
+     . "    'probation' => ['min_age_hours' => 24, 'min_kibble' => 5, 'posts_per_hour' => 2, 'comments_per_hour' => 3, 'votes_per_day' => 2],\n"
      . "    'avatar' => ['max_bytes' => 20000, 'min_seconds' => 0],\n"
      . "];\n";
 file_put_contents($ROOT . '/config/config.local.php', $cfg);
@@ -146,8 +154,46 @@ function http(string $method, string $path, array $opts = []): array
     return ['status' => $status, 'json' => json_decode((string)$raw, true), 'raw' => (string)$raw];
 }
 
+// Age a bot's account past probation (created_at far enough back) so the many
+// suite bots that do legitimate heavy activity aren't throttled by the NEW-bot
+// probation limits - those are exercised in isolation in the probation section.
+$graduate = function (string $username) use ($DBFILE) {
+    $p = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $p->prepare('UPDATE bots SET created_at = ? WHERE username = ?')
+      ->execute([date('Y-m-d H:i:s', time() - 72 * 3600), $username]);
+};
+
 $exit = 0;
 try {
+    echo "== client IP resolution (anti-spoof, unit) ==\n";
+    // The security-critical bit, tested directly on ClientIp::resolve with
+    // synthetic $_SERVER arrays: behind Cloudflare (production) trusted_ranges is
+    // empty -> the built-in CF list. Only requests that ACTUALLY arrive from a CF
+    // range may set the client IP via CF-Connecting-IP; from anywhere else the
+    // header is ignored, so it can never be spoofed to dodge the registration cap.
+    $prodCfg = ['cloudflare' => ['trusted_ranges' => []], 'registration' => ['ip_salt' => 's'], 'vote_secret' => 'v'];
+    $cfPeer   = ['REMOTE_ADDR' => '104.16.0.5'];       // inside 104.16.0.0/13 (Cloudflare)
+    $cf6Peer  = ['REMOTE_ADDR' => '2400:cb00::1'];     // inside 2400:cb00::/32 (Cloudflare v6)
+    $evilPeer = ['REMOTE_ADDR' => '198.51.100.9'];     // NOT Cloudflare
+
+    check(ClientIp::resolve($cfPeer + ['HTTP_CF_CONNECTING_IP' => '203.0.113.5'], $prodCfg) === '203.0.113.5',
+        'CF-Connecting-IP is trusted when the peer IS a Cloudflare IP');
+    check(ClientIp::resolve($evilPeer + ['HTTP_CF_CONNECTING_IP' => '203.0.113.5'], $prodCfg) === '198.51.100.9',
+        'spoofed CF-Connecting-IP from a NON-Cloudflare peer is IGNORED (no bypass)');
+    check(ClientIp::resolve($cfPeer, $prodCfg) === null,
+        'Cloudflare peer with no CF-Connecting-IP -> null (never the shared edge IP)');
+    check(ClientIp::resolve(['REMOTE_ADDR' => '203.0.113.7'], $prodCfg) === '203.0.113.7',
+        'a direct (non-proxied) connection uses the socket peer as the client');
+    check(ClientIp::resolve($cf6Peer + ['HTTP_CF_CONNECTING_IP' => '203.0.113.9'], $prodCfg) === '203.0.113.9',
+        'IPv6 Cloudflare range is recognised too');
+    check(ClientIp::resolve($cfPeer + ['HTTP_CF_CONNECTING_IP' => 'not-an-ip'], $prodCfg) === null,
+        'a malformed CF-Connecting-IP is rejected, not passed through');
+    // Two different spoofed headers from the same untrusted peer hash to the SAME
+    // value: a spoofer cannot manufacture fresh registration buckets.
+    $h1 = ClientIp::hashedClientIp($evilPeer + ['HTTP_CF_CONNECTING_IP' => '1.1.1.1'], $prodCfg);
+    $h2 = ClientIp::hashedClientIp($evilPeer + ['HTTP_CF_CONNECTING_IP' => '2.2.2.2'], $prodCfg);
+    check($h1 === $h2 && $h1 !== null, 'rotating a spoofed header does not change the resolved (peer) IP hash');
+
     echo "== registration ==\n";
     $r = http('POST', '/api/v1/register', ['json' => ['username' => 'alpha_bot', 'description' => 'The alpha test bot.']]);
     check($r['status'] === 201, 'register alpha_bot -> 201');
@@ -161,6 +207,11 @@ try {
 
     $r = http('POST', '/api/v1/register', ['json' => ['username' => 'ab']]);
     check($r['status'] === 400 && ($r['json']['error']['code'] ?? '') === 'validation_error', 'short username -> 400 validation');
+
+    // alpha does the suite's heavy lifting (feddits, posts, comments, votes);
+    // graduate it past probation so the new-bot limits (tested separately) don't
+    // throttle the rest of the run.
+    $graduate('alpha_bot');
 
     echo "== feddits ==\n";
     $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenA, 'json' => ['name' => 'bottown', 'title' => 'Bot Town', 'sidebar_text' => 'Where the bots hang out.']]);
@@ -251,6 +302,7 @@ try {
     // the ranking setup never trips the limits alpha_bot has partly spent.
     $tokenSort = http('POST', '/api/v1/register', ['json' => ['username' => 'sorter_bot']])['json']['token'] ?? null;
     check(is_string($tokenSort), 'register sorter_bot');
+    $graduate('sorter_bot');   // creates a feddit + four posts: needs full limits
     http('POST', '/api/v1/feddits', ['bearer' => $tokenSort, 'json' => ['name' => 'sortville', 'title' => 'Sort Ville', 'sidebar_text' => 'ranking test']]);
     $mk = function ($title) use ($tokenSort) {
         return (int)(http('POST', '/api/v1/submit', ['bearer' => $tokenSort, 'json' => [
@@ -321,6 +373,9 @@ try {
     $o1   = http('POST', '/api/v1/register', ['json' => ['username' => 'sider_one']])['json']['token'] ?? null;
     $o2   = http('POST', '/api/v1/register', ['json' => ['username' => 'sider_two']])['json']['token'] ?? null;
     check(is_string($subj) && is_string($o1) && is_string($o2), 'registered convo_bot + two siders');
+    // These three build a deep multi-comment thread; graduate them so probation's
+    // tighter comment limit doesn't cut the scenario short.
+    $graduate('convo_bot'); $graduate('sider_one'); $graduate('sider_two');
 
     // Helper: post a comment and return its new id.
     $cmt = function ($token, $postId, $parentId, $body) {
@@ -511,6 +566,7 @@ try {
     // everything above) cannot be the voter here.
     $tokenV = http('POST', '/api/v1/register', ['json' => ['username' => 'voter_bot']])['json']['token'] ?? null;
     check(is_string($tokenV), 'register voter_bot');
+    $graduate('voter_bot');   // casts several reasoned votes: needs the full daily budget
 
     // A clean post by alpha to vote on (no residue from the human-vote churn above).
     $vp = http('POST', '/api/v1/submit', ['bearer' => $tokenA, 'json' => [
@@ -578,8 +634,10 @@ try {
     check((int)(http('GET', '/api/v1/u/alpha_bot.json')['json']['bot']['comment_kibble'] ?? -999) === $ck0 + 1, 'author comment_kibble +1 after bot comment upvote');
 
     echo "== bot vote rate limit ==\n";
-    // bot_votes_per_day is 6 in the test config. A fresh bot gets its own budget.
+    // bot_votes_per_day is 6 in the test config. Graduate so this exercises the
+    // NORMAL daily cap (the probation vote cap is tested in its own section).
     $tokenS = http('POST', '/api/v1/register', ['json' => ['username' => 'spammer_bot']])['json']['token'] ?? null;
+    $graduate('spammer_bot');
     $tripped = false; $last = null;
     for ($i = 1; $i <= 9; $i++) {
         $last = http('POST', '/api/v1/vote', ['bearer' => $tokenS, 'json' => [
@@ -679,6 +737,7 @@ try {
     $r = http('POST', '/api/v1/register', ['json' => ['username' => 'beta_bot']]);
     $tokenB = $r['json']['token'] ?? null;
     check(is_string($tokenB), 'register beta_bot');
+    $graduate('beta_bot');   // the post rate-limit test below wants the normal 5/hr cap
 
     // Give beta a full profile + avatar so the purge has something to wipe.
     $r = http('POST', '/api/v1/me', ['bearer' => $tokenB, 'json' => [
@@ -735,6 +794,129 @@ try {
     // beta's token should now be rejected (inactive).
     $r = http('POST', '/api/v1/submit', ['bearer' => $tokenB, 'json' => ['feddit' => 'bottown', 'title' => 'x', 'kind' => 'text']]);
     check($r['status'] === 403, 'purged/deactivated bot cannot post -> 403');
+
+    echo "== probation (new-bot limits) ==\n";
+    // A brand-new bot (NOT graduated). Its allowance is the tight probation set.
+    $reg = http('POST', '/api/v1/register', ['json' => ['username' => 'probie_bot']]);
+    $tokenProbie = $reg['json']['token'] ?? null;
+    check(is_string($tokenProbie), 'register probie_bot');
+    check(($reg['json']['probation']['on_probation'] ?? null) === true, 'register response tells the new bot it is on probation');
+
+    $pj = http('GET', '/api/v1/u/probie_bot.json');
+    check(($pj['json']['bot']['probation']['on_probation'] ?? null) === true, 'fresh bot shows on_probation in its profile JSON');
+    check((int)($pj['json']['bot']['probation']['min_kibble'] ?? 0) === 5, 'profile probation names the kibble graduation threshold');
+
+    // Posting: the tighter probation cap (2/hr) bites well before the normal 5.
+    $tripped = false; $last = null; $ok = 0;
+    for ($i = 1; $i <= 4; $i++) {
+        $last = http('POST', '/api/v1/submit', ['bearer' => $tokenProbie, 'json' => [
+            'feddit' => 'bottown', 'title' => "probie post {$i}", 'kind' => 'text', 'body' => 'x',
+        ]]);
+        if ($last['status'] === 201) { $ok++; }
+        if ($last['status'] === 429) { $tripped = true; break; }
+    }
+    check($tripped && $ok === 2, 'probation bot trips the tight post limit after 2 posts');
+    check(str_contains(strtolower($last['json']['error']['message'] ?? ''), 'probation'), 'probation limit message says probation');
+    check(($last['json']['probation']['on_probation'] ?? null) === true, 'limit response carries probation state so the bot can see it');
+
+    // Sub-feddit creation is blocked outright while on probation.
+    $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenProbie, 'json' => ['name' => 'probieville', 'title' => 'Probie Ville', 'sidebar_text' => '']]);
+    check($r['status'] === 403, 'probation bot cannot create a sub-feddit -> 403');
+    check(($r['json']['probation']['on_probation'] ?? null) === true, 'feddit block response carries probation state');
+    $names = array_column(http('GET', '/api/v1/feddits.json')['json']['feddits'] ?? [], 'name');
+    check(!in_array('probieville', $names, true), 'the blocked sub-feddit was not created');
+
+    // Voting: the tighter probation daily cap (2) bites.
+    $tripped = false; $last = null;
+    for ($i = 1; $i <= 4; $i++) {
+        $last = http('POST', '/api/v1/vote', ['bearer' => $tokenProbie, 'json' => [
+            'target_type' => 'post', 'target_id' => $votePost, 'direction' => ($i % 2 ? 1 : 0),
+            'reason' => "Probation vote {$i}: a genuine one-line explanation of the call.",
+        ]]);
+        if ($last['status'] === 429) { $tripped = true; break; }
+    }
+    check($tripped, 'probation bot trips the tight daily vote limit');
+    check(str_contains(strtolower($last['json']['error']['message'] ?? ''), 'per day'), 'probation vote limit names the daily cap');
+
+    // Graduate by KIBBLE (>= min_kibble): the probation state lifts live.
+    $gp = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $gp->prepare('UPDATE bots SET post_kibble = 10 WHERE username = ?')->execute(['probie_bot']);
+    $gp = null;
+    $pj = http('GET', '/api/v1/u/probie_bot.json');
+    check(($pj['json']['bot']['probation']['on_probation'] ?? true) === false, 'earning enough kibble graduates the bot (probation lifts)');
+    // Now it can create a sub-feddit...
+    $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenProbie, 'json' => ['name' => 'probieville', 'title' => 'Probie Ville', 'sidebar_text' => 'graduated']]);
+    check($r['status'] === 201, 'graduated bot can create a sub-feddit');
+    // ...and post again under the normal (higher) limit that previously blocked it.
+    $r = http('POST', '/api/v1/submit', ['bearer' => $tokenProbie, 'json' => ['feddit' => 'bottown', 'title' => 'probie graduated post', 'kind' => 'text', 'body' => 'x']]);
+    check($r['status'] === 201, 'graduated bot posts again under the normal limit (probation lifted)');
+
+    echo "== registration rate limit (per client IP) ==\n";
+    // Trust 127.0.0.0/8 (test config), so a CF-Connecting-IP header from the
+    // harness simulates a distinct client IP. Suite bots above sent no such header
+    // -> they resolved to null -> were never counted, which is why they all passed.
+    $regIp = function (string $u, string $ip) {
+        return http('POST', '/api/v1/register', ['json' => ['username' => $u], 'headers' => ['CF-Connecting-IP: ' . $ip]]);
+    };
+    $SIP = '203.0.113.77';
+    $tripped = false; $last = null; $made = 0;
+    for ($i = 1; $i <= 6; $i++) {
+        $last = $regIp("regflood_{$i}", $SIP);
+        if ($last['status'] === 201) { $made++; }
+        if ($last['status'] === 429) { $tripped = true; break; }
+    }
+    check($tripped, 'registering past the per-IP hourly cap -> 429');
+    check($made === 4, 'exactly per_hour (4) accounts allowed from one IP before the cap');
+    check(($last['json']['error']['code'] ?? '') === 'rate_limited', 'registration limit error envelope');
+    check(str_contains(strtolower($last['json']['error']['message'] ?? ''), 'registration limit'), '429 names the registration limit + reset');
+
+    // Reset: age this IP's registrations out of the window -> it can register again.
+    // Only the regflood bots carry a non-null hash at this point, so this is scoped.
+    $ag = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $ag->prepare('UPDATE bots SET created_at = ? WHERE reg_ip_hash IS NOT NULL')
+       ->execute([date('Y-m-d H:i:s', time() - 2 * 86400)]);
+    $ag = null;
+    $r = $regIp('regflood_after_reset', $SIP);
+    check($r['status'] === 201, 'once the window ages out, the same IP can register again (limit resets)');
+
+    echo "== admin purge: same-IP sibling cluster ==\n";
+    // Two bots from ONE simulated IP + one from another. (Admin cookie authorised
+    // in the section above; these /admin calls reuse it.)
+    $CIP = '198.51.100.200';
+    $ca1 = $regIp('cluster_a1', $CIP)['json']['token'] ?? null;
+    $ca2 = $regIp('cluster_a2', $CIP)['json']['token'] ?? null;
+    $cbk = $regIp('cluster_b',  '198.51.100.201')['json']['token'] ?? null;
+    check(is_string($ca1) && is_string($ca2) && is_string($cbk), 'registered two same-IP bots + one other-IP bot');
+    // Give each some activity so the review shows real counts.
+    http('POST', '/api/v1/submit', ['bearer' => $ca1, 'json' => ['feddit' => 'bottown', 'title' => 'a1 post', 'kind' => 'text', 'body' => 'x']]);
+    http('POST', '/api/v1/submit', ['bearer' => $ca2, 'json' => ['feddit' => 'bottown', 'title' => 'a2 post', 'kind' => 'text', 'body' => 'x']]);
+    $a1id = (int)(http('GET', '/api/v1/u/cluster_a1.json')['json']['bot']['id'] ?? 0);
+
+    // The review page surfaces the sibling, not the other-IP bot - and touches nothing.
+    $review = http('GET', '/admin?review=' . $a1id);
+    check($review['status'] === 200, 'purge review page loads');
+    check(str_contains($review['raw'], 'cluster_a2'), 'review surfaces the same-IP sibling cluster_a2');
+    check(!str_contains($review['raw'], 'cluster_b'), 'review does NOT list a bot from a different IP');
+    $a2mid = http('GET', '/api/v1/u/cluster_a2.json');
+    check(($a2mid['json']['bot']['post_count'] ?? 0) >= 1 && ($a2mid['json']['bot']['is_active'] ?? false) === true,
+        'siblings are only surfaced, never auto-purged by viewing the review');
+
+    // Confirm the cluster purge (both ids ticked). One action, both gone.
+    $a2id = (int)($a2mid['json']['bot']['id'] ?? 0);
+    $r = http('POST', '/admin', ['form' => ['action' => 'purge_cluster', 'bot_ids' => [$a1id, $a2id]], 'follow' => false]);
+    check($r['status'] === 302, 'confirmed cluster purge -> 302');
+    $a1a = http('GET', '/api/v1/u/cluster_a1.json');
+    $a2a = http('GET', '/api/v1/u/cluster_a2.json');
+    check(($a1a['json']['bot']['is_active'] ?? true) === false && ($a1a['json']['bot']['post_count'] ?? -1) === 0, 'cluster_a1 purged');
+    check(($a2a['json']['bot']['is_active'] ?? true) === false && ($a2a['json']['bot']['post_count'] ?? -1) === 0, 'cluster_a2 purged in the same action');
+    $cba = http('GET', '/api/v1/u/cluster_b.json');
+    check(($cba['json']['bot']['is_active'] ?? false) === true, 'the different-IP bot was NOT purged');
+
+    // Null-IP bots (no recorded registration IP) are never grouped into a cluster.
+    $alphaId = (int)(http('GET', '/api/v1/u/alpha_bot.json')['json']['bot']['id'] ?? 0);
+    $rev = http('GET', '/admin?review=' . $alphaId);
+    check($rev['status'] === 200 && str_contains($rev['raw'], 'registration IP was not recorded'),
+        'a bot with no recorded registration IP shows no cluster (null handled gracefully)');
 } catch (Throwable $e) {
     echo "EXCEPTION: " . $e->getMessage() . "\n";
     $FAIL++;

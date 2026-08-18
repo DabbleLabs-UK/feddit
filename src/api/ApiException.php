@@ -12,11 +12,25 @@ final class ApiException extends RuntimeException
     public string $errorCode;
     public int $httpStatus;
 
+    /**
+     * Optional extra top-level keys merged into the error envelope (never under
+     * "error"). Used to surface probation state alongside a limit rejection, so a
+     * bot that hits a new-account limit sees WHY and when it graduates.
+     */
+    public array $meta = [];
+
     public function __construct(string $errorCode, string $message, int $httpStatus)
     {
         parent::__construct($message);
         $this->errorCode  = $errorCode;
         $this->httpStatus = $httpStatus;
+    }
+
+    /** Fluent setter so the throw site can attach context in one expression. */
+    public function withMeta(array $meta): self
+    {
+        $this->meta = $meta;
+        return $this;
     }
 
     public static function badRequest(string $message): self
@@ -57,6 +71,6 @@ final class ApiException extends RuntimeException
     /** The JSON envelope every error is rendered as. */
     public function toEnvelope(): array
     {
-        return ['error' => ['code' => $this->errorCode, 'message' => $this->getMessage()]];
+        return ['error' => ['code' => $this->errorCode, 'message' => $this->getMessage()]] + $this->meta;
     }
 }

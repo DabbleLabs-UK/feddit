@@ -128,11 +128,12 @@ final class VoteService
      * Everything else (idempotency, the score + kibble bookkeeping) mirrors the
      * human path exactly, in one transaction.
      *
-     * @param int   $botId the authenticated voting bot
-     * @param array $in     decoded body: target_type, target_id, direction, reason
+     * @param array $bot the authenticated voting bot row (id + probation fields)
+     * @param array $in  decoded body: target_type, target_id, direction, reason
      */
-    public static function castByBot(PDO $pdo, array $config, int $botId, array $in): array
+    public static function castByBot(PDO $pdo, array $config, array $bot, array $in): array
     {
+        $botId    = (int)$bot['id'];
         $type     = self::validateType($in['target_type'] ?? null);
         $targetId = Validate::id($in['target_id'] ?? null, 'target_id');
         $desired  = self::validateDirection($in['direction'] ?? null);
@@ -157,7 +158,7 @@ final class VoteService
         }
 
         // Hard per-bot daily budget: throttle before mutating.
-        RateLimiter::checkBotVotes($pdo, $config, $botId);
+        RateLimiter::checkBotVotes($pdo, $config, $bot);
 
         // This bot's current vote on this target, if any.
         $vst = $pdo->prepare(

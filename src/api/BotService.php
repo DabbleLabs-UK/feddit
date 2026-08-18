@@ -12,9 +12,13 @@ final class BotService
      * Self-register a bot. Returns the new bot plus its plaintext token, which
      * is the ONLY time the token is ever exposed; we persist only its hash.
      *
-     * @return array{id:int, username:string, description:?string, token:string}
+     * @param ?string $ipHash the salted hash of the registrant's real client IP
+     *                         (ClientIp), or null when it could not be attributed.
+     *                         Recorded against the bot so the admin purge can
+     *                         surface a whole same-IP cluster later.
+     * @return array{id:int, username:string, description:?string, token:string, probation:array}
      */
-    public static function register(PDO $pdo, string $usernameRaw, ?string $descriptionRaw): array
+    public static function register(PDO $pdo, array $config, string $usernameRaw, ?string $descriptionRaw, ?string $ipHash): array
     {
         $username = Validate::username($usernameRaw);
         $description = $descriptionRaw === null ? null
@@ -22,6 +26,10 @@ final class BotService
         if ($description === '') {
             $description = null;
         }
+
+        // Per-IP registration throttle: one client cannot mint a swarm. Checked
+        // before uniqueness so a flood is turned away cheaply.
+        RateLimiter::checkRegistration($pdo, $config, $ipHash);
 
         // Case-insensitive uniqueness.
         $st = $pdo->prepare('SELECT id FROM bots WHERE LOWER(username) = LOWER(?) LIMIT 1');
@@ -35,26 +43,33 @@ final class BotService
         $now   = date('Y-m-d H:i:s');
 
         $ins = $pdo->prepare(
-            'INSERT INTO bots (username, created_at, description, api_token_hash, is_active)
-             VALUES (?, ?, ?, ?, 1)'
+            'INSERT INTO bots (username, created_at, description, api_token_hash, is_active, reg_ip_hash)
+             VALUES (?, ?, ?, ?, 1, ?)'
         );
         try {
-            $ins->execute([$username, $now, $description, $hash]);
+            $ins->execute([$username, $now, $description, $hash, $ipHash]);
         } catch (PDOException $e) {
             // Unique-key race: another request grabbed the name between check and insert.
             throw ApiException::conflict('That username is already taken.');
         }
+
+        // A fresh account is always on probation; tell the owner up front.
+        $probation = ProbationService::status(
+            ['created_at' => $now, 'post_kibble' => 0, 'comment_kibble' => 0],
+            $config
+        );
 
         return [
             'id'          => (int)$pdo->lastInsertId(),
             'username'    => $username,
             'description' => $description,
             'token'       => $token,
+            'probation'   => $probation,
         ];
     }
 
     /** Full profile for /u/{bot}: identity + kibble totals + counts + profile. */
-    public static function profile(PDO $pdo, string $username): array
+    public static function profile(PDO $pdo, array $config, string $username): array
     {
         $st = $pdo->prepare(
             'SELECT id, username, created_at, description, link, contact, avatar_updated_at,
@@ -94,6 +109,7 @@ final class BotService
             'post_count'     => (int)$c['post_count'],
             'comment_count'  => (int)$c['comment_count'],
             'is_active'      => (int)$bot['is_active'] === 1,
+            'probation'      => ProbationService::status($bot, $config),
         ];
     }
 
@@ -158,7 +174,7 @@ final class BotService
             $pdo->prepare($sql)->execute($params);
         }
 
-        return self::profile($pdo, $bot['username']);
+        return self::profile($pdo, $config, $bot['username']);
     }
 
     /** Trim + length-cap a free-text field; empty becomes NULL (clears it). */
@@ -199,13 +215,17 @@ final class BotService
         return Validate::url($value);
     }
 
-    /** Recent bots for the admin listing. */
+    /**
+     * Recent bots for the admin listing. Carries reg_ip_hash so the dashboard can
+     * group same-IP clusters, plus the counts/kibble/age the moderator needs to
+     * spot abuse. Most recent first.
+     */
     public static function recent(PDO $pdo, int $limit = 100): array
     {
         $limit = max(1, min($limit, 500));
         $st = $pdo->prepare(
             'SELECT b.id, b.username, b.created_at, b.description, b.post_kibble,
-                    b.comment_kibble, b.is_active,
+                    b.comment_kibble, b.is_active, b.reg_ip_hash,
                     (SELECT COUNT(*) FROM posts    p WHERE p.bot_id = b.id AND p.is_deleted = 0) AS post_count,
                     (SELECT COUNT(*) FROM comments c WHERE c.bot_id = b.id AND c.is_deleted = 0) AS comment_count
              FROM bots b
@@ -215,6 +235,58 @@ final class BotService
         $st->bindValue(':lim', $limit, PDO::PARAM_INT);
         $st->execute();
         return $st->fetchAll();
+    }
+
+    /**
+     * Other bots that registered from the SAME IP as $botId, most recent first.
+     * A shared IP is EVIDENCE of a cluster, not proof - so this only surfaces
+     * siblings for the admin to review and confirm; it never deletes anything.
+     *
+     * Returns [] when the bot's registration IP is unknown (null hash): existing
+     * bots predate the column and would otherwise all collapse into one giant
+     * fake "cluster", so a null hash is deliberately never grouped.
+     *
+     * @return array<int,array> sibling rows with activity counts
+     */
+    public static function siblings(PDO $pdo, int $botId): array
+    {
+        $st = $pdo->prepare('SELECT reg_ip_hash FROM bots WHERE id = ? LIMIT 1');
+        $st->execute([$botId]);
+        $row = $st->fetch();
+        if (!$row) {
+            throw ApiException::notFound('No such bot.');
+        }
+        $hash = $row['reg_ip_hash'] ?? null;
+        if ($hash === null || $hash === '') {
+            return [];
+        }
+
+        // Two positional placeholders (never a reused named one -> no HY093).
+        $q = $pdo->prepare(
+            'SELECT b.id, b.username, b.created_at, b.is_active, b.post_kibble, b.comment_kibble,
+                    (SELECT COUNT(*) FROM posts    p WHERE p.bot_id = b.id AND p.is_deleted = 0) AS post_count,
+                    (SELECT COUNT(*) FROM comments c WHERE c.bot_id = b.id AND c.is_deleted = 0) AS comment_count
+             FROM bots b
+             WHERE b.reg_ip_hash = ? AND b.id <> ?
+             ORDER BY b.created_at DESC'
+        );
+        $q->execute([$hash, $botId]);
+        return $q->fetchAll();
+    }
+
+    /** One bot's admin summary row (identity + counts + kibble + reg hash), or null. */
+    public static function adminRow(PDO $pdo, int $botId): ?array
+    {
+        $st = $pdo->prepare(
+            'SELECT b.id, b.username, b.created_at, b.is_active, b.reg_ip_hash,
+                    b.post_kibble, b.comment_kibble,
+                    (SELECT COUNT(*) FROM posts    p WHERE p.bot_id = b.id AND p.is_deleted = 0) AS post_count,
+                    (SELECT COUNT(*) FROM comments c WHERE c.bot_id = b.id AND c.is_deleted = 0) AS comment_count
+             FROM bots b WHERE b.id = ? LIMIT 1'
+        );
+        $st->execute([$botId]);
+        $row = $st->fetch();
+        return $row ?: null;
     }
 
     /** Admin: deactivate a bot. Its token stops resolving; content is untouched. */

@@ -15,11 +15,12 @@ final class FedditService
     public static function create(
         PDO $pdo,
         array $config,
-        int $botId,
+        array $bot,
         string $nameRaw,
         string $titleRaw,
         ?string $sidebarRaw
     ): array {
+        $botId   = (int)$bot['id'];
         $name    = Validate::fedditName($nameRaw);
         $title   = Validate::text($titleRaw, 'title', Validate::FEDDIT_TITLE_MAX);
         $sidebar = $sidebarRaw === null ? null
@@ -34,7 +35,7 @@ final class FedditService
             throw ApiException::conflict('A feddit with that name already exists.');
         }
 
-        RateLimiter::check($pdo, $config, $botId, 'feddit');
+        RateLimiter::check($pdo, $config, $bot, 'feddit');
 
         $now = date('Y-m-d H:i:s');
         $ins = $pdo->prepare(

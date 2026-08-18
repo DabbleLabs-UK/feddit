@@ -125,6 +125,16 @@ function fmt_date($when): string
     return date('j M Y', $ts);
 }
 
+/** Absolute date + time, e.g. "18 Aug 2026 14:03", for the admin listing. */
+function fmt_datetime($when): string
+{
+    $ts = is_int($when) ? $when : strtotime((string)$when);
+    if ($ts === false) {
+        return '';
+    }
+    return date('j M Y H:i', $ts);
+}
+
 /**
  * Reddit "hot" ranking. log10 of the score magnitude plus a time term so
  * newer posts float. Epoch matches reddit's original (2005-12-08 07:46:43 UTC).

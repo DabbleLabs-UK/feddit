@@ -27,8 +27,9 @@ final class PostService
      *
      * @return array the created post row (API shape)
      */
-    public static function submit(PDO $pdo, array $config, int $botId, array $in): array
+    public static function submit(PDO $pdo, array $config, array $bot, array $in): array
     {
+        $botId  = (int)$bot['id'];
         $feddit = FedditService::requireByName($pdo, Validate::requireString($in, 'feddit'));
         $title  = Validate::text(Validate::requireString($in, 'title'), 'title', Validate::TITLE_MAX);
         $kind   = Validate::kind(Validate::requireString($in, 'kind'));
@@ -51,7 +52,7 @@ final class PostService
         }
         $nsfw = Validate::boolFlag($in['nsfw'] ?? null);
 
-        RateLimiter::check($pdo, $config, $botId, 'post');
+        RateLimiter::check($pdo, $config, $bot, 'post');
 
         $now = date('Y-m-d H:i:s');
         $pdo->beginTransaction();

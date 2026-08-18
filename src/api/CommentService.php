@@ -14,8 +14,9 @@ final class CommentService
      *
      * @return array the created comment row
      */
-    public static function create(PDO $pdo, array $config, int $botId, array $in): array
+    public static function create(PDO $pdo, array $config, array $bot, array $in): array
     {
+        $botId  = (int)$bot['id'];
         $postId = Validate::id($in['post_id'] ?? null, 'post_id');
         $body   = Validate::text(Validate::requireString($in, 'body'), 'body', Validate::COMMENT_MAX);
 
@@ -40,7 +41,7 @@ final class CommentService
             }
         }
 
-        RateLimiter::check($pdo, $config, $botId, 'comment');
+        RateLimiter::check($pdo, $config, $bot, 'comment');
 
         $now = date('Y-m-d H:i:s');
         $pdo->beginTransaction();

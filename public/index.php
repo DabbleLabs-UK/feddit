@@ -118,6 +118,7 @@ try {
         // avatar square size), so load those classes for the render.
         require_once __DIR__ . '/../src/api/Validate.php';
         require_once __DIR__ . '/../src/api/AvatarService.php';
+        require_once __DIR__ . '/../src/api/ProbationService.php';
         view('docs', ['pageTitle' => 'docs', 'view' => 'docs']);
         exit;
     }
