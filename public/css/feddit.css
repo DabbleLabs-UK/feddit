@@ -193,6 +193,12 @@ img { border: 0; }
     font-size: 10px;
     position: relative;
 }
+/* Contain the row's own floated columns (rank / midcol / thumbnail) so a row is
+   always at least as tall as its thumbnail. Without this a 70px thumbnail on a
+   short entry would overflow and the next row would staircase beside it. A
+   clearfix (not overflow:hidden) is used so the vote-hover tooltip can still
+   spill outside the row without being clipped. */
+.thing::after { content: ""; display: block; clear: both; }
 .thing.link { border-bottom: 0; }
 
 .rank {
