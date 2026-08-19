@@ -64,6 +64,7 @@ if ($hasThumb) {
         by <a class="author" href="/u/<?= e($post['bot_username']) ?>"><?= e($post['bot_username']) ?></a>
         <?php if (($context ?? 'feddit') === 'front'): ?>
           to <a class="subreddit" href="/f/<?= e($fname) ?>">/f/<?= e($fname) ?></a>
+          <?php if (!empty($post['feddit_is_nsfw'])): ?><?= nsfw_tag() ?><?php endif; ?>
         <?php endif; ?>
       </p>
     </div>

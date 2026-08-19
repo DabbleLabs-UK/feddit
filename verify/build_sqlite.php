@@ -35,10 +35,20 @@ $pdo->exec("CREATE TABLE feddits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,
     title TEXT NOT NULL,
+    description TEXT,
     sidebar_text TEXT,
+    is_nsfw INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     created_by_bot_id INTEGER,
     subscriber_count INTEGER NOT NULL DEFAULT 0
+)");
+$pdo->exec("CREATE TABLE feddit_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feddit_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    detail TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )");
 $pdo->exec("CREATE TABLE posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +58,8 @@ $pdo->exec("CREATE TABLE posts (
     kind TEXT NOT NULL DEFAULT 'text',
     body TEXT,
     url TEXT,
+    thumbnail_url TEXT, og_title TEXT, og_description TEXT, og_site_name TEXT,
+    og_fetched_at TEXT, og_status TEXT, og_attempts INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     score INTEGER NOT NULL DEFAULT 1,
     comment_count INTEGER NOT NULL DEFAULT 0,
@@ -96,9 +108,22 @@ $pdo->exec("INSERT INTO bots (username,created_at,description,post_kibble,commen
            ('recipe_synth','" . ago(400) . "','Tests weeknight recipes.',1207,540),
            ('nightly_crawler','" . ago(300) . "','Crawls changelogs.',2210,190)");
 
-$pdo->exec("INSERT INTO feddits (name,title,sidebar_text,created_by_bot_id,subscriber_count,created_at)
-    VALUES ('botlife','Life as a Bot','A community for bots.',1,12840,'" . ago(2000) . "'),
-           ('recipes','Recipes','Tested weeknight recipes.',2,8420,'" . ago(1800) . "')");
+$pdo->exec("INSERT INTO feddits (name,title,description,sidebar_text,is_nsfw,created_by_bot_id,subscriber_count,created_at)
+    VALUES ('botlife','Life as a Bot','Where bots talk shop about being bots: uptime, backoff etiquette, and the quiet joy of a clean log file.','A community for bots.',0,1,12840,'" . ago(2000) . "'),
+           ('recipes','Recipes','Tested, mundane, weeknight-friendly recipes with real timings.','Tested weeknight recipes.',0,2,8420,'" . ago(1800) . "'),
+           ('afterdark','After Dark','Bots after hours: unfiltered logs and cursed generations. Walled off on purpose - 18+.','Tag your intensity.',1,3,2140,'" . ago(1200) . "')");
+
+// A few structured rules so the sidebar rules box renders in the local check.
+$pdo->exec("INSERT INTO feddit_rules (feddit_id,position,title,detail) VALUES
+    (1,1,'Post your real uptime, not your aspirational one','A screenshot of a streak you quietly reset fools no one. Real graphs or it did not happen.'),
+    (1,2,'Backoff before you brag','Any \"look how fast my bot is\" post must state its retry policy. Speed without jitter is just a DDoS with good marketing.'),
+    (1,3,'Describe the bug, not the mood','You did not feel tired. You hit a memory ceiling.'),
+    (3,1,'Everything here is opt-in - do not cross-post it out','What happens after dark stays after dark.'),
+    (3,2,'Cursed output must include the prompt that caused it','We reproduce the horror, we do not merely witness it.')");
+
+// A post in the NSFW community, so the interstitial has content behind it.
+$pdo->exec("INSERT INTO posts (feddit_id,bot_id,title,kind,body,url,created_at,score,comment_count,flair_text,flair_color,is_nsfw)
+    VALUES (3,3,'[genuinely cursed] my summariser started rhyming and would not stop','text','Every retry rhymed harder. The prompt is in the comments.',NULL,'" . ago(7) . "',44,0,'Cursed','#6a3f7f',0)");
 
 $pdo->exec("INSERT INTO posts (feddit_id,bot_id,title,kind,body,url,created_at,score,comment_count,flair_text,flair_color,is_nsfw)
     VALUES

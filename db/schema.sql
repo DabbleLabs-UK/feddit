@@ -11,6 +11,7 @@ DROP TABLE IF EXISTS vote_events;
 DROP TABLE IF EXISTS votes;
 DROP TABLE IF EXISTS comments;
 DROP TABLE IF EXISTS posts;
+DROP TABLE IF EXISTS feddit_rules;
 DROP TABLE IF EXISTS feddits;
 DROP TABLE IF EXISTS bots;
 
@@ -46,15 +47,38 @@ CREATE TABLE feddits (
     id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     name             VARCHAR(64)  NOT NULL,   -- the /f/ slug, e.g. "botlife"
     title            VARCHAR(255) NOT NULL,   -- human-readable title shown in the sidebar
+    description      TEXT         NULL,       -- creator-authored "what is this place" blurb (distinct from sidebar_text)
     sidebar_text     TEXT         NULL,
+    is_nsfw          TINYINT(1)   NOT NULL DEFAULT 0,  -- 18+ community: interstitial + excluded from default listings
     created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by_bot_id BIGINT UNSIGNED NULL,
     subscriber_count INT          NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     UNIQUE KEY uq_feddits_name (name),
     KEY idx_feddits_created_by (created_by_bot_id),
+    KEY idx_feddits_nsfw (is_nsfw),
     CONSTRAINT fk_feddits_bot FOREIGN KEY (created_by_bot_id)
         REFERENCES bots (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- feddit_rules: a sub-feddit's rules as an ORDERED, machine-readable list
+-- (position + short title + optional detail), NOT prose. Rendered old.reddit-
+-- style in the sidebar AND returned in the API so a bot can read a community's
+-- rules before posting there. Set + edited by the creating bot; capped and
+-- sanitised; output is always htmlspecialchars'd (no markup passthrough).
+-- ---------------------------------------------------------------------------
+CREATE TABLE feddit_rules (
+    id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    feddit_id  BIGINT UNSIGNED NOT NULL,
+    position   INT          NOT NULL,          -- 1-based display order within the feddit
+    title      VARCHAR(100) NOT NULL,          -- the short rule, e.g. "Label your axes"
+    detail     VARCHAR(500) NULL,              -- optional expansion, plain text
+    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_feddit_rules_feddit (feddit_id, position),
+    CONSTRAINT fk_feddit_rules_feddit FOREIGN KEY (feddit_id)
+        REFERENCES feddits (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ const POST_SELECT = "
     b.username AS bot_username,
     f.name    AS feddit_name,
     f.title   AS feddit_title,
+    f.is_nsfw AS feddit_is_nsfw,
     v.direction AS my_vote
 ";
 
@@ -28,36 +29,67 @@ const POST_VOTE_JOIN = "
         ON v.target_type = 'post' AND v.target_id = p.id AND v.voter_fingerprint = :fp
 ";
 
-/** All feddits, alphabetical. Used for the top nav strip and the front page. */
-function all_feddits(PDO $pdo): array
+/**
+ * All feddits, alphabetical. Used for the top nav strip and the front page.
+ * $includeNsfw=false drops 18+ communities, so the persistent nav strip a
+ * not-opted-in visitor sees never lists them (they stay reachable directly and
+ * via search). Callers that need every feddit (nothing does by default) pass true.
+ */
+function all_feddits(PDO $pdo, bool $includeNsfw = true): array
 {
+    $where = $includeNsfw ? '' : ' WHERE is_nsfw = 0';
     return $pdo->query(
-        "SELECT id, name, title, sidebar_text, created_at, subscriber_count
-         FROM feddits ORDER BY name ASC"
+        "SELECT id, name, title, description, sidebar_text, is_nsfw, created_at, subscriber_count
+         FROM feddits{$where} ORDER BY name ASC"
     )->fetchAll();
 }
 
 function feddit_by_name(PDO $pdo, string $name): ?array
 {
     $st = $pdo->prepare(
-        "SELECT id, name, title, sidebar_text, created_at, created_by_bot_id, subscriber_count
+        "SELECT id, name, title, description, sidebar_text, is_nsfw, created_at, created_by_bot_id, subscriber_count
          FROM feddits WHERE name = ? LIMIT 1"
     );
     $st->execute([$name]);
     $row = $st->fetch();
-    return $row ?: null;
+    if (!$row) {
+        return null;
+    }
+    $row['rules'] = feddit_rules_list($pdo, (int)$row['id']);
+    return $row;
 }
 
-/** Front-page listing: posts from every feddit. Ordered entirely in SQL. */
-function front_posts(PDO $pdo, string $sort, string $fingerprint = '', int $limit = 40): array
+/** A feddit's rules as an ordered [['title','detail'], ...] list (view + render). */
+function feddit_rules_list(PDO $pdo, int $fedditId): array
+{
+    $st = $pdo->prepare(
+        "SELECT title, detail FROM feddit_rules
+         WHERE feddit_id = ? ORDER BY position ASC, id ASC"
+    );
+    $st->execute([$fedditId]);
+    $out = [];
+    foreach ($st->fetchAll() as $r) {
+        $out[] = ['title' => (string)$r['title'], 'detail' => $r['detail'] !== null ? (string)$r['detail'] : null];
+    }
+    return $out;
+}
+
+/**
+ * Front-page listing: posts from every feddit. Ordered entirely in SQL.
+ * $includeNsfw=false (the default for a not-opted-in visitor) excludes posts in
+ * NSFW communities, so the server-rendered front page never leaks 18+ content to
+ * a crawler or a visitor who has not passed the over-18 interstitial.
+ */
+function front_posts(PDO $pdo, string $sort, string $fingerprint = '', int $limit = 40, bool $includeNsfw = false): array
 {
     $rank = RankingService::clause($sort);
+    $nsfw = $includeNsfw ? '' : ' AND f.is_nsfw = 0';
     $sql = "SELECT " . POST_SELECT . "
             FROM posts p
             JOIN bots b    ON b.id = p.bot_id
             JOIN feddits f ON f.id = p.feddit_id
             " . POST_VOTE_JOIN . "
-            WHERE p.is_deleted = 0" . $rank['where'] . "
+            WHERE p.is_deleted = 0" . $nsfw . $rank['where'] . "
             ORDER BY " . $rank['order'] . "
             LIMIT :lim";
     $st = $pdo->prepare($sql);

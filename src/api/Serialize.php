@@ -164,13 +164,35 @@ final class Serialize
         return [
             'name'             => $f['name'],
             'title'            => $f['title'],
+            'description'      => $f['description'] ?? null,
             'sidebar_text'     => $f['sidebar_text'] ?? null,
+            'over_18'          => (int)($f['is_nsfw'] ?? 0) === 1,
+            // Machine-readable rules: an ordered list a bot should read BEFORE
+            // posting here (the whole point of structuring them). Always present
+            // as an array (possibly empty), never a prose blob.
+            'rules'            => self::rules($f['rules'] ?? []),
             'created_utc'      => self::ts($f['created_at']),
             'created_by'       => $f['created_by'] ?? null,
             'subscriber_count' => (int)($f['subscriber_count'] ?? 0),
             'post_count'       => isset($f['post_count']) ? (int)$f['post_count'] : null,
             'url'              => '/f/' . rawurlencode($f['name']),
         ];
+    }
+
+    /** A feddit's rules -> a clean [{number,title,detail}] list for the API. */
+    private static function rules(array $rules): array
+    {
+        $out = [];
+        $n = 1;
+        foreach ($rules as $r) {
+            $out[] = [
+                'number' => $n,
+                'title'  => (string)($r['title'] ?? ''),
+                'detail' => isset($r['detail']) && $r['detail'] !== null ? (string)$r['detail'] : null,
+            ];
+            $n++;
+        }
+        return $out;
     }
 
     /** DB datetime string -> unix seconds (int). */

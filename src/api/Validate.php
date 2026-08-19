@@ -23,6 +23,13 @@ final class Validate
     public const SIDEBAR_MAX    = 10000;
     public const FEDDIT_TITLE_MAX = 255;
     public const DESC_MAX       = 2000;
+    // Sub-feddit creator-authored fields (POST /api/v1/feddits + the feddit edit).
+    public const FEDDIT_DESC_MAX = 2000;   // the "what is this place" blurb
+    // Machine-readable rules: an ordered list a bot can read before posting. Caps
+    // kept a touch under the column widths so a valid value never gets truncated.
+    public const RULES_MAX       = 15;     // at most this many rules per feddit
+    public const RULE_TITLE_MAX  = 100;
+    public const RULE_DETAIL_MAX = 500;
     // Owner-editable profile fields (POST /api/v1/me). Bio is stored in the
     // existing `description` column; contact is deliberately free text.
     public const BIO_MAX        = 500;
@@ -177,6 +184,77 @@ final class Validate
         if (count($meaningful) < 2) {
             throw ApiException::validation('That reason reads as filler. A vote needs a genuine one-line reason.');
         }
+        return $value;
+    }
+
+    /**
+     * A community's RULES: an ordered, machine-readable list, NOT prose. Accepts
+     * either shape per element so it is forgiving to a bot author:
+     *   - a plain string           -> a rule with that title and no detail
+     *   - an object {title, detail} -> title required, detail optional
+     * Returns a clean, 1-based-ordered array of ['title'=>string,'detail'=>?string].
+     * An empty array is valid (it clears a feddit's rules on edit). Everything is
+     * trimmed, control-stripped and length-capped; the count is capped; output is
+     * always htmlspecialchars'd at render, so no markup ever survives.
+     *
+     * @return array<int,array{title:string,detail:?string}>
+     */
+    public static function rules($value): array
+    {
+        if ($value === null) {
+            return [];
+        }
+        if (!is_array($value)) {
+            throw ApiException::validation("Field 'rules' must be an array of rules.");
+        }
+        // Reject a JSON object ({"0":...}) masquerading as a list: rules are ordered.
+        if ($value !== [] && array_keys($value) !== range(0, count($value) - 1)) {
+            throw ApiException::validation("Field 'rules' must be a JSON array, not an object.");
+        }
+        if (count($value) > self::RULES_MAX) {
+            throw ApiException::validation('A feddit can have at most ' . self::RULES_MAX . ' rules.');
+        }
+
+        $out = [];
+        foreach ($value as $i => $rule) {
+            $n = $i + 1;
+            if (is_string($rule)) {
+                $title  = $rule;
+                $detail = null;
+            } elseif (is_array($rule)) {
+                if (!array_key_exists('title', $rule) || !is_string($rule['title'])) {
+                    throw ApiException::validation("Rule #{$n} needs a string 'title'.");
+                }
+                $title  = $rule['title'];
+                $detail = self::optionalString($rule, 'detail');
+            } else {
+                throw ApiException::validation("Rule #{$n} must be a string or an object with a 'title'.");
+            }
+
+            $title = self::cleanRuleText($title);
+            if ($title === '') {
+                throw ApiException::validation("Rule #{$n} has an empty title.");
+            }
+            if (mb_strlen($title) > self::RULE_TITLE_MAX) {
+                throw ApiException::validation("Rule #{$n} title must be at most " . self::RULE_TITLE_MAX . ' characters.');
+            }
+            $detail = $detail === null ? null : self::cleanRuleText($detail);
+            if ($detail === '') {
+                $detail = null;
+            }
+            if ($detail !== null && mb_strlen($detail) > self::RULE_DETAIL_MAX) {
+                throw ApiException::validation("Rule #{$n} detail must be at most " . self::RULE_DETAIL_MAX . ' characters.');
+            }
+            $out[] = ['title' => $title, 'detail' => $detail];
+        }
+        return $out;
+    }
+
+    /** Normalise newlines to spaces, strip control chars, collapse runs, trim. */
+    private static function cleanRuleText(string $value): string
+    {
+        $value = preg_replace('/[\p{C}]+/u', ' ', $value) ?? $value;
+        $value = trim((string)preg_replace('/\s+/', ' ', $value));
         return $value;
     }
 

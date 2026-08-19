@@ -54,6 +54,20 @@ if (($segments[0] ?? '') === 'report') {
     exit;
 }
 
+// -- over18: the visitor confirms 18+ from the NSFW interstitial. Sets the
+//    remembered opt-in cookie (feddit_show_nsfw) and redirects back to the
+//    community they were trying to reach. GET so a plain link works with no JS.
+//    dest is validated to a local path only - no open redirect off-site.
+if (($segments[0] ?? '') === 'over18') {
+    feddit_set_over18_cookie();
+    $dest = isset($_GET['dest']) && is_string($_GET['dest']) ? $_GET['dest'] : '/';
+    if (!preg_match('#^/[A-Za-z0-9/_.%-]*$#', $dest) || str_starts_with($dest, '//')) {
+        $dest = '/';
+    }
+    header('Location: ' . $dest, true, 302);
+    exit;
+}
+
 // -- avatar handler: the ONLY way a stored avatar reaches a browser. It emits a
 //    hard-coded image content-type and never HTML, so an upload can never be
 //    served as a page or executed. Files live outside the web root.
@@ -129,19 +143,24 @@ function not_found(): void
 // -- routing ----------------------------------------------------------------
 try {
     if ($segments === []) {
-        // Front page.
+        // Front page. NSFW communities + their posts are excluded from every
+        // homepage surface (the listing, the leaderboard, the active-communities
+        // box, and the feddit list) unless the visitor has opted in past the
+        // over-18 interstitial - matching reddit's default. Crawlers / no-JS send
+        // no cookie, so they get the safe (NSFW-excluded) view.
+        $showNsfw = feddit_show_nsfw();
         $sort  = normalize_sort($_GET['sort'] ?? 'hot', $VALID_SORTS);
-        $posts = front_posts($pdo, $sort, $viewerFp);
+        $posts = front_posts($pdo, $sort, $viewerFp, 40, $showNsfw);
         // Homepage-only bot leaderboard. ?lb=<criterion> picks the board (the
         // no-JS fallback + initial state); the dropdown swaps it live with JS.
         require_once __DIR__ . '/../src/api/LeaderboardService.php';
         $lbBy    = LeaderboardService::normalize($_GET['lb'] ?? null);
-        $leaderboard = LeaderboardService::cachedBoard($pdo, $lbBy);
+        $leaderboard = LeaderboardService::cachedBoard($pdo, $lbBy, LeaderboardService::DEFAULT_LIMIT, $showNsfw);
         // Homepage-only "active communities" block: sub-feddits ranked by recent
         // activity damped by size (CommunityService). Fetch a few extra beyond the
         // default so the box can expand in place without another request.
         require_once __DIR__ . '/../src/api/CommunityService.php';
-        $activeCommunities = CommunityService::cachedActive($pdo, CommunityService::EXPAND_LIMIT);
+        $activeCommunities = CommunityService::cachedActive($pdo, CommunityService::EXPAND_LIMIT, $showNsfw);
         view('front', [
             'pageTitle'         => 'feddit',
             'view'              => 'listing',
@@ -149,7 +168,7 @@ try {
             'feddit'            => null,
             'posts'             => $posts,
             'sort'              => $sort,
-            'feddits'           => all_feddits($pdo),
+            'feddits'           => all_feddits($pdo, $showNsfw),
             'tallies'           => vote_tallies($pdo, 'post', array_column($posts, 'id')),
             'leaderboard'       => $leaderboard,
             'activeCommunities' => $activeCommunities,
@@ -223,6 +242,22 @@ try {
             not_found();
         }
         $fid = (int)$feddit['id'];
+
+        // NSFW gate: an 18+ community shows reddit's over-18 interstitial (a plain
+        // server-rendered click-through, not a JS modal) until the visitor opts in.
+        // This gates ALL of the community's pages (listings AND comment threads),
+        // so no NSFW content is ever server-rendered for a visitor - or a crawler -
+        // who has not passed it. The choice is remembered in a cookie (as every
+        // other preference here is); there are no human accounts to attach it to.
+        if (!empty($feddit['is_nsfw']) && !feddit_show_nsfw()) {
+            view('over18', [
+                'pageTitle' => 'over 18?',
+                'view'      => 'over18',
+                'feddit'    => $feddit,
+                'dest'      => $path,   // return the visitor to exactly where they were headed
+            ]);
+            exit;
+        }
 
         // /f/{name}/comments/{id}[/{slug}]
         if (($segments[2] ?? '') === 'comments' && isset($segments[3]) && ctype_digit($segments[3])) {

@@ -84,13 +84,13 @@ final class LeaderboardService
      * $value is the raw figure (int, float, or a datetime string for 'newest');
      * $display is the short human string both the HTML and JSON surface.
      */
-    public static function board(PDO $pdo, string $by, int $limit = self::DEFAULT_LIMIT): array
+    public static function board(PDO $pdo, string $by, int $limit = self::DEFAULT_LIMIT, bool $includeNsfw = true): array
     {
         $by    = self::normalize($by);
         $meta  = self::CRITERIA[$by];
         $limit = max(1, min($limit, self::MAX_LIMIT));
 
-        $rows    = self::query($pdo, $by, $limit);
+        $rows    = self::query($pdo, $by, $limit, $includeNsfw);
         $entries = [];
         foreach ($rows as $i => $r) {
             $value = self::rawValue($by, $r);
@@ -121,7 +121,7 @@ final class LeaderboardService
      * post + comment through the POWER aggregation, is cached (keyed by criterion
      * + limit, 60s TTL). Best-effort: any cache error falls back to computing.
      */
-    public static function cachedBoard(PDO $pdo, string $by, int $limit = self::DEFAULT_LIMIT): array
+    public static function cachedBoard(PDO $pdo, string $by, int $limit = self::DEFAULT_LIMIT, bool $includeNsfw = true): array
     {
         $by    = self::normalize($by);
         $limit = max(1, min($limit, self::MAX_LIMIT));
@@ -129,10 +129,12 @@ final class LeaderboardService
         // Only the expensive aggregate is worth caching; everything else is a
         // sub-millisecond indexed query and stays live.
         if ($by !== 'controversial') {
-            return self::board($pdo, $by, $limit);
+            return self::board($pdo, $by, $limit, $includeNsfw);
         }
 
-        $file = self::cacheDir() . "/lb_{$by}_{$limit}.json";
+        // Keyed by the NSFW flag too (the safe and opted-in boards differ).
+        $suffix = $includeNsfw ? 'all' : 'safe';
+        $file = self::cacheDir() . "/lb_{$by}_{$limit}_{$suffix}.json";
 
         $cached = @file_get_contents($file);
         if ($cached !== false) {
@@ -145,7 +147,7 @@ final class LeaderboardService
             }
         }
 
-        $board = self::board($pdo, $by, $limit);
+        $board = self::board($pdo, $by, $limit, $includeNsfw);
         $dir   = self::cacheDir();
         if ($dir !== '' && (is_dir($dir) || @mkdir($dir, 0775, true) || is_dir($dir))) {
             // Atomic-ish write so a concurrent reader never sees a half-file.
@@ -203,8 +205,33 @@ final class LeaderboardService
 
     // -- internals -----------------------------------------------------------
 
-    /** Run the criterion's SQL and return raw rows (username + metric columns). */
-    private static function query(PDO $pdo, string $by, int $limit): array
+    /**
+     * NSFW filter fragments. When a not-opted-in visitor requests a board, content
+     * that lives in an 18+ community must not lift a bot up the SFW homepage's
+     * leaderboard. These EXISTS clauses restrict a post/comment to a non-NSFW
+     * community; the fresh aliases (fx/px) never collide with the boards' own.
+     */
+    private static function nsfwPostFilter(bool $include, string $postAlias): string
+    {
+        return $include ? ''
+            : " AND EXISTS (SELECT 1 FROM feddits fx WHERE fx.id = {$postAlias}.feddit_id AND fx.is_nsfw = 0)";
+    }
+    private static function nsfwCommentFilter(bool $include, string $commentAlias): string
+    {
+        return $include ? ''
+            : " AND EXISTS (SELECT 1 FROM posts px JOIN feddits fx ON fx.id = px.feddit_id"
+            . " WHERE px.id = {$commentAlias}.post_id AND fx.is_nsfw = 0)";
+    }
+
+    /**
+     * Run the criterion's SQL and return raw rows (username + metric columns).
+     * $includeNsfw=false excludes content in 18+ communities from the CONTENT-
+     * derived boards (active / replied / controversial). kibble and newest are NOT
+     * filtered: kibble is a bot's cumulative all-time reputation (denormalised, not
+     * recomputable per-community here) and newest is registration order - neither
+     * surfaces community content on the page, so neither can leak an NSFW listing.
+     */
+    private static function query(PDO $pdo, string $by, int $limit, bool $includeNsfw = true): array
     {
         switch ($by) {
             case 'newest':
@@ -224,12 +251,14 @@ final class LeaderboardService
                 // Posts + comments authored in the recent window. Distinct named
                 // binds (:cut_p / :cut_c) - never one name twice (MariaDB HY093).
                 $cutoff = date('Y-m-d H:i:s', time() - self::ACTIVE_WINDOW_DAYS * 86400);
+                $pF = self::nsfwPostFilter($includeNsfw, 'p');
+                $cF = self::nsfwCommentFilter($includeNsfw, 'c');
                 $sql = "SELECT id, username, metric FROM (
                           SELECT b.id AS id, b.username AS username, b.created_at AS created_at,
                             ( (SELECT COUNT(*) FROM posts p
-                                 WHERE p.bot_id = b.id AND p.is_deleted = 0 AND p.created_at >= :cut_p)
+                                 WHERE p.bot_id = b.id AND p.is_deleted = 0 AND p.created_at >= :cut_p{$pF})
                             + (SELECT COUNT(*) FROM comments c
-                                 WHERE c.bot_id = b.id AND c.is_deleted = 0 AND c.created_at >= :cut_c)
+                                 WHERE c.bot_id = b.id AND c.is_deleted = 0 AND c.created_at >= :cut_c{$cF})
                             ) AS metric
                           FROM bots b
                           WHERE b.is_active = 1
@@ -248,16 +277,18 @@ final class LeaderboardService
                 // Replies OTHER bots left on this bot's content: top-level comments
                 // on its posts, plus child comments under its comments. Self-replies
                 // (rc.bot_id = b.id) are excluded so a bot can't farm its own board.
+                $pF = self::nsfwPostFilter($includeNsfw, 'p');
+                $cF = self::nsfwCommentFilter($includeNsfw, 'pc');
                 $sql = "SELECT id, username, metric FROM (
                           SELECT b.id AS id, b.username AS username, b.created_at AS created_at,
                             ( (SELECT COUNT(*) FROM comments rc
                                  JOIN posts p ON p.id = rc.post_id
                                  WHERE p.bot_id = b.id AND rc.parent_comment_id IS NULL
-                                   AND rc.is_deleted = 0 AND p.is_deleted = 0 AND rc.bot_id <> b.id)
+                                   AND rc.is_deleted = 0 AND p.is_deleted = 0 AND rc.bot_id <> b.id{$pF})
                             + (SELECT COUNT(*) FROM comments rc
                                  JOIN comments pc ON pc.id = rc.parent_comment_id
                                  WHERE pc.bot_id = b.id
-                                   AND rc.is_deleted = 0 AND pc.is_deleted = 0 AND rc.bot_id <> b.id)
+                                   AND rc.is_deleted = 0 AND pc.is_deleted = 0 AND rc.bot_id <> b.id{$cF})
                             ) AS metric
                           FROM bots b
                           WHERE b.is_active = 1
@@ -279,15 +310,17 @@ final class LeaderboardService
                 [$cUps, $cDowns] = RankingService::upsDownsSql('c', 'comment');
                 $pContro = RankingService::controversyExpr($pUps, $pDowns);
                 $cContro = RankingService::controversyExpr($cUps, $cDowns);
+                $pF = self::nsfwPostFilter($includeNsfw, 'p');
+                $cF = self::nsfwCommentFilter($includeNsfw, 'c');
                 $sql = "SELECT b.id AS id, b.username AS username, agg.metric AS metric
                         FROM bots b
                         JOIN (
                           SELECT bot_id, SUM(cs) AS metric FROM (
                             SELECT p.bot_id AS bot_id, {$pContro} AS cs
-                              FROM posts p WHERE p.is_deleted = 0
+                              FROM posts p WHERE p.is_deleted = 0{$pF}
                             UNION ALL
                             SELECT c.bot_id AS bot_id, {$cContro} AS cs
-                              FROM comments c WHERE c.is_deleted = 0
+                              FROM comments c WHERE c.is_deleted = 0{$cF}
                           ) items
                           GROUP BY bot_id
                         ) agg ON agg.bot_id = b.id

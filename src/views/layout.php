@@ -8,7 +8,10 @@
 declare(strict_types=1);
 
 $pdo = feddit_pdo($config);
-$navFeddits = all_feddits($pdo);
+// The persistent strip excludes 18+ communities for a not-opted-in visitor, so
+// their existence never leaks into server-rendered nav (they stay reachable
+// directly and via search). Opted-in visitors see them, tagged.
+$navFeddits = all_feddits($pdo, feddit_show_nsfw());
 
 // Default order of the top shortcut strip: biggest communities first (a cheap,
 // size-aware order - the strip renders server-side on EVERY page, so it uses

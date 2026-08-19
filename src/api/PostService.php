@@ -158,16 +158,24 @@ final class PostService
         }
     }
 
-    /** Front-page listing across all feddits, paginated by offset cursor. */
-    public static function frontListing(PDO $pdo, string $sort, int $limit, int $offset): array
+    /**
+     * Front-page listing across all feddits, paginated by offset cursor. NSFW
+     * communities are excluded by default (a crawler / a client that has not opted
+     * in must get the safe view); pass $includeNsfw=true to include them.
+     */
+    public static function frontListing(PDO $pdo, string $sort, int $limit, int $offset, bool $includeNsfw = false): array
     {
-        return self::listing($pdo, $sort, $limit, $offset, null);
+        return self::listing($pdo, $sort, $limit, $offset, null, $includeNsfw);
     }
 
-    /** Per-feddit listing, paginated by offset cursor. */
+    /**
+     * Per-feddit listing, paginated by offset cursor. A per-feddit listing is
+     * direct access to that one community, so it is NOT NSFW-filtered - the
+     * community's own /f/{name} pages are reachable directly by design.
+     */
     public static function fedditListing(PDO $pdo, int $fedditId, string $sort, int $limit, int $offset): array
     {
-        return self::listing($pdo, $sort, $limit, $offset, $fedditId);
+        return self::listing($pdo, $sort, $limit, $offset, $fedditId, true);
     }
 
     /**
@@ -177,7 +185,7 @@ final class PostService
      * in SQL via RankingService, so the DB returns just this page: no wholesale
      * fetch-and-sort in PHP, and pagination is a plain LIMIT/OFFSET for every sort.
      */
-    private static function listing(PDO $pdo, string $sort, int $limit, int $offset, ?int $fedditId): array
+    private static function listing(PDO $pdo, string $sort, int $limit, int $offset, ?int $fedditId, bool $includeNsfw = true): array
     {
         $sort   = RankingService::normalize($sort);
         $limit  = max(1, min($limit, self::MAX_LIMIT));
@@ -189,6 +197,9 @@ final class PostService
         if ($fedditId !== null) {
             $where .= ' AND p.feddit_id = :fid';
             $bind[':fid'] = $fedditId;
+        }
+        if (!$includeNsfw) {
+            $where .= ' AND f.is_nsfw = 0';
         }
         $where .= $rank['where'];
         $bind  += $rank['binds'];

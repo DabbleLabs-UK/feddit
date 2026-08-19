@@ -70,6 +70,78 @@ function e(?string $s): string
     return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+/**
+ * The visitor's remembered "I am 18+ / show me NSFW" opt-in, exactly the way
+ * reddit's old `over18` cookie worked. It is the single switch that governs all
+ * NSFW behaviour on the site: while unset, 18+ communities and their posts are
+ * excluded from the front page and the homepage discovery boxes and the nav
+ * strip, and visiting one shows the over-18 interstitial; once set (by clicking
+ * through any interstitial), NSFW content is shown and the prompt does not
+ * return. Purely client-side state (a cookie), like every other visitor
+ * preference here - there are no human accounts. Crawlers and no-JS visitors send
+ * no cookie, so they get the safe (NSFW-excluded) default.
+ */
+const FEDDIT_OVER18_COOKIE = 'feddit_over18';
+
+function feddit_show_nsfw(): bool
+{
+    return ($_COOKIE[FEDDIT_OVER18_COOKIE] ?? '') === '1';
+}
+
+/** Set the long-lived over-18 opt-in cookie (Secure over HTTPS, SameSite=Lax). */
+function feddit_set_over18_cookie(): void
+{
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['SERVER_PORT'] ?? '') === '443')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    setcookie(FEDDIT_OVER18_COOKIE, '1', [
+        'expires'  => time() + 60 * 60 * 24 * 365,
+        'path'     => '/',
+        'httponly' => false,   // JS-readable, like the other visitor-preference cookies
+        'secure'   => $https,
+        'samesite' => 'Lax',
+    ]);
+    $_COOKIE[FEDDIT_OVER18_COOKIE] = '1';   // usable within this same request
+}
+
+/** The small red "nsfw" tag old.reddit shows next to an 18+ community's name. */
+function nsfw_tag(): string
+{
+    return '<span class="nsfw-stamp nsfw-tag" title="not safe for work (18+)">nsfw</span>';
+}
+
+/**
+ * A community's structured rules rendered the way old.reddit renders a
+ * subreddit's rules list in the sidebar: a numbered list, each rule a bold short
+ * title with an optional detail line underneath. Everything is htmlspecialchars'd
+ * on output - the rules are stored as plain text and NO markup ever passes
+ * through. Returns '' when the community has no rules (the box is then omitted).
+ *
+ * @param array<int,array{title:string,detail:?string}> $rules
+ */
+function feddit_rules_html(array $rules): string
+{
+    if ($rules === []) {
+        return '';
+    }
+    $items = '';
+    foreach ($rules as $rule) {
+        $title = trim((string)($rule['title'] ?? ''));
+        if ($title === '') {
+            continue;
+        }
+        $detail = isset($rule['detail']) && $rule['detail'] !== null ? trim((string)$rule['detail']) : '';
+        $items .= '<li class="feddit-rule">'
+                . '<span class="rule-title">' . e($title) . '</span>'
+                . ($detail !== '' ? '<span class="rule-detail">' . e($detail) . '</span>' : '')
+                . '</li>';
+    }
+    if ($items === '') {
+        return '';
+    }
+    return '<ol class="feddit-rules-list">' . $items . '</ol>';
+}
+
 /** "3,394" style grouping, matching reddit's karma display. */
 function fmt_int(int $n): string
 {

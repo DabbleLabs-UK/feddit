@@ -354,6 +354,16 @@ a.title:hover { text-decoration: underline; }
     vertical-align: middle;
     text-transform: uppercase;
 }
+/* The community-level NSFW tag shown next to a sub-feddit's name (sidebar, the
+   active-communities box, the front-page "to /f/name" line). Same red pill as the
+   per-post stamp; letter-spacing to read as a tag, not a word. */
+.nsfw-tag {
+    font-size: 8px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    padding: 1px 4px;
+    margin-left: 4px;
+}
 .domain {
     color: #888;
     font-size: 10px;
@@ -494,6 +504,42 @@ ul.flat-list.buttons li.first a { color: #888; }
     padding: 30px 10px;
     text-align: center;
 }
+
+/* --------------------------------------------------------------------------
+   Over-18 interstitial (NSFW community click-through). Plain and boxed, in
+   old.reddit's style - not a modern modal. The whole content column, centred.
+   -------------------------------------------------------------------------- */
+.over18-content { text-align: center; }
+.over18-interstitial {
+    max-width: 500px;
+    margin: 50px auto;
+    padding: 26px 28px 24px;
+    background: #fff;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.over18-head {
+    font-size: 18px; color: #222; font-weight: bold; margin-bottom: 12px;
+}
+.over18-sub { font-size: 13px; color: #444; margin-bottom: 6px; }
+.over18-sub .nsfw-stamp { text-transform: uppercase; }
+.over18-q { font-size: 14px; color: #333; margin: 12px 0 18px; }
+.over18-buttons { margin-bottom: 16px; }
+.over18-yes {
+    display: inline-block;
+    font: bold 14px Verdana, Arial, sans-serif;
+    color: #fff; background: #ff4500;
+    border: 1px solid #cc3700; border-radius: 3px;
+    padding: 7px 22px; margin: 0 6px;
+}
+.over18-yes:hover { text-decoration: none; background: #e03d00; }
+.over18-no {
+    display: inline-block;
+    font: 13px Verdana, Arial, sans-serif;
+    color: #369; padding: 7px 12px; margin: 0 6px;
+}
+.over18-foot { font-size: 11px; color: #888; margin-top: 8px; }
 
 /* --------------------------------------------------------------------------
    Self-text expando (comments page + post body)
@@ -776,6 +822,33 @@ ul.flat-list.buttons li.first a { color: #888; }
 .titlebox .subscribers .number { color: #333; font-weight: bold; }
 .titlebox .usertext-body.md { font-size: 12px; color: #333; }
 .titlebox .usertext-body.md p { margin-bottom: 8px; }
+/* Creator-authored "what is this place" blurb, above the sidebar notes. */
+.titlebox-description {
+    font-size: 12px; color: #333; line-height: 1.5;
+    margin-bottom: 8px; padding-bottom: 8px;
+    border-bottom: 1px solid #eee;
+}
+
+/* --------------------------------------------------------------------------
+   Community rules (sidebar sidecontentbox) - old.reddit renders a subreddit's
+   rules as a numbered list, each a short title with an optional detail line.
+   -------------------------------------------------------------------------- */
+.feddit-rules-list { list-style: none; counter-reset: rule; margin: 0; padding: 0; }
+.feddit-rules-list .feddit-rule {
+    counter-increment: rule;
+    position: relative;
+    padding: 4px 0 4px 22px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 12px;
+}
+.feddit-rules-list .feddit-rule:last-child { border-bottom: 0; }
+.feddit-rules-list .feddit-rule::before {
+    content: counter(rule) ".";
+    position: absolute; left: 0; top: 4px;
+    color: #888; font-weight: bold; width: 18px; text-align: right;
+}
+.feddit-rules-list .rule-title { display: block; color: #222; font-weight: bold; }
+.feddit-rules-list .rule-detail { display: block; color: #666; margin-top: 1px; line-height: 1.4; }
 .titlebox .bottom {
     margin-top: 8px; padding-top: 8px;
     border-top: 1px solid #eee;

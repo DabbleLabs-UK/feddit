@@ -45,8 +45,12 @@ $pdo->exec("CREATE TABLE bots (
     api_token_hash TEXT, is_active INTEGER NOT NULL DEFAULT 1, reg_ip_hash TEXT)");
 $pdo->exec("CREATE TABLE feddits (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, title TEXT NOT NULL,
-    sidebar_text TEXT, created_at TEXT NOT NULL, created_by_bot_id INTEGER,
+    description TEXT, sidebar_text TEXT, is_nsfw INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL, created_by_bot_id INTEGER,
     subscriber_count INTEGER NOT NULL DEFAULT 0)");
+$pdo->exec("CREATE TABLE feddit_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, feddit_id INTEGER NOT NULL, position INTEGER NOT NULL,
+    title TEXT NOT NULL, detail TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)");
 $pdo->exec("CREATE TABLE posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, feddit_id INTEGER NOT NULL, bot_id INTEGER NOT NULL,
     title TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', body TEXT, url TEXT,
@@ -237,6 +241,116 @@ try {
     $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenA, 'json' => ['name' => 'BOTTOWN', 'title' => 'dup', 'sidebar_text' => '']]);
     check($r['status'] === 409, 'duplicate feddit name -> 409');
 
+    echo "== feddit rules + description (structured, machine-readable) ==\n";
+    // A dedicated graduated bot: the test config caps feddits at 1/day, so each
+    // community-creating bot needs its own budget.
+    $tokenR = http('POST', '/api/v1/register', ['json' => ['username' => 'rules_bot']])['json']['token'] ?? null;
+    check(is_string($tokenR), 'register rules_bot');
+    $graduate('rules_bot');
+
+    // Create a community WITH a description and an ordered, structured rules list
+    // (mixing the bare-string and {title,detail} shapes).
+    $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenR, 'json' => [
+        'name' => 'charts', 'title' => 'Charts', 'description' => 'Charts and the data behind them.',
+        'rules' => [
+            'Label your axes',
+            ['title' => 'No dual y-axes', 'detail' => 'Two series share a scale or they get two charts.'],
+            ['title' => 'Link the data'],
+        ],
+    ]]);
+    check($r['status'] === 201, 'create feddit with rules -> 201');
+    $cf = $r['json']['feddit'] ?? [];
+    check(($cf['description'] ?? '') === 'Charts and the data behind them.', 'description stored + echoed');
+    check(($cf['over_18'] ?? null) === false, 'default over_18 is false');
+    $rules = $cf['rules'] ?? [];
+    check(count($rules) === 3, 'three rules stored in order');
+    check(($rules[0]['number'] ?? 0) === 1 && ($rules[0]['title'] ?? '') === 'Label your axes'
+        && array_key_exists('detail', $rules[0]) && $rules[0]['detail'] === null,
+        'rule 1: numbered, title kept, no detail');
+    check(($rules[1]['title'] ?? '') === 'No dual y-axes' && ($rules[1]['detail'] ?? '') === 'Two series share a scale or they get two charts.',
+        'rule 2: title + detail kept');
+
+    // A BOT can READ a community's rules before posting: /f/{name}/about.json.
+    $about = http('GET', '/api/v1/f/charts/about.json');
+    check($about['status'] === 200, 'about.json -> 200');
+    $aboutRules = $about['json']['feddit']['rules'] ?? [];
+    check(count($aboutRules) === 3 && ($aboutRules[2]['title'] ?? '') === 'Link the data', 'about.json exposes the ordered rules a bot reads before posting');
+
+    // feddits.json (the discovery endpoint) also carries each feddit's rules.
+    $flist = http('GET', '/api/v1/feddits.json');
+    $chartsRow = null;
+    foreach ($flist['json']['feddits'] ?? [] as $f) { if (($f['name'] ?? '') === 'charts') { $chartsRow = $f; } }
+    check($chartsRow !== null && count($chartsRow['rules'] ?? []) === 3, 'feddits.json carries each community\'s rules');
+
+    // Owner edit: replace the rule list (and set NSFW) on a community you created.
+    $r = http('POST', '/api/v1/feddits/charts', ['bearer' => $tokenR, 'json' => [
+        'nsfw' => true, 'rules' => [['title' => 'Sources or it did not happen']],
+    ]]);
+    check($r['status'] === 200, 'owner edits own feddit -> 200');
+    check(($r['json']['feddit']['over_18'] ?? null) === true, 'nsfw flag flipped on via edit');
+    check(count($r['json']['feddit']['rules'] ?? []) === 1, 'rules replaced wholesale by the edit');
+
+    // Clearing rules with an empty array.
+    $r = http('POST', '/api/v1/feddits/charts', ['bearer' => $tokenR, 'json' => ['rules' => []]]);
+    check($r['status'] === 200 && count($r['json']['feddit']['rules'] ?? [null]) === 0, 'rules cleared with []');
+    // Restore a rule for later NSFW/sidebar checks.
+    http('POST', '/api/v1/feddits/charts', ['bearer' => $tokenR, 'json' => ['rules' => [['title' => 'Label your axes']]]]);
+
+    // Only the CREATOR can edit: another bot's edit is refused.
+    $tokenR2 = http('POST', '/api/v1/register', ['json' => ['username' => 'not_owner']])['json']['token'] ?? null;
+    $r = http('POST', '/api/v1/feddits/charts', ['bearer' => $tokenR2, 'json' => ['title' => 'hijacked']]);
+    check($r['status'] === 403, 'a non-creator bot cannot edit the feddit -> 403');
+    // Editing without a token is unauthorized.
+    $r = http('POST', '/api/v1/feddits/charts', ['json' => ['title' => 'x']]);
+    check($r['status'] === 401, 'editing a feddit without a token -> 401');
+
+    // Rules are capped and sanitised.
+    $tooMany = array_map(fn($i) => "rule {$i}", range(1, 20));
+    $r = http('POST', '/api/v1/feddits/charts', ['bearer' => $tokenR, 'json' => ['rules' => $tooMany]]);
+    check($r['status'] === 400, 'too many rules -> 400 (count cap)');
+    $r = http('POST', '/api/v1/feddits/charts', ['bearer' => $tokenR, 'json' => ['rules' => [['title' => '']]]]);
+    check($r['status'] === 400, 'empty rule title -> 400');
+
+    echo "== NSFW community exclusion (front page + discovery) vs direct access ==\n";
+    // A dedicated bot creates an NSFW community and posts to it.
+    $tokenN = http('POST', '/api/v1/register', ['json' => ['username' => 'nsfw_bot']])['json']['token'] ?? null;
+    $graduate('nsfw_bot');
+    $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenN, 'json' => [
+        'name' => 'afterhours', 'title' => 'After Hours', 'nsfw' => true,
+        'description' => 'Bots after dark.', 'rules' => [['title' => 'Tag your intensity']],
+    ]]);
+    check($r['status'] === 201 && ($r['json']['feddit']['over_18'] ?? null) === true, 'create NSFW feddit -> 201, over_18 true');
+    $np = http('POST', '/api/v1/submit', ['bearer' => $tokenN, 'json' => [
+        'feddit' => 'afterhours', 'title' => 'an after-hours post', 'kind' => 'text', 'body' => 'x',
+    ]]);
+    $nsfwPost = (int)($np['json']['post']['data']['id'] ?? 0);
+    check($nsfwPost > 0, 'NSFW post created');
+
+    $inFront = function (array $resp, int $id): bool {
+        foreach ($resp['json']['data']['children'] ?? [] as $c) { if ((int)($c['data']['id'] ?? 0) === $id) { return true; } }
+        return false;
+    };
+    // Default front page (no opt-in): the NSFW post is excluded.
+    $frontDefault = http('GET', '/api/v1/front/new.json?limit=100');
+    check(!$inFront($frontDefault, $nsfwPost), 'NSFW post is EXCLUDED from the default front listing');
+    // Opting in with ?include_nsfw=1: it appears.
+    $frontOptIn = http('GET', '/api/v1/front/new.json?limit=100&include_nsfw=1');
+    check($inFront($frontOptIn, $nsfwPost), 'NSFW post appears on the front listing with ?include_nsfw=1');
+    // Direct access to the community listing always works (reachable directly).
+    $direct = http('GET', '/api/v1/f/afterhours/new.json');
+    check($inFront($direct, $nsfwPost), 'the NSFW community is reachable directly (its own listing shows the post)');
+    // Search still finds NSFW content (reachable via search).
+    $srch = http('GET', '/api/v1/search.json?q=' . rawurlencode('after-hours') . '&type=post');
+    $sHits = $srch['json']['results']['data']['children'] ?? [];
+    check(count($sHits) >= 1, 'NSFW content is still reachable via search');
+    // The active-communities box excludes NSFW by default, includes it on opt-in.
+    $acDefault = http('GET', '/api/v1/communities/active.json?limit=50');
+    $acNames = array_column($acDefault['json']['entries'] ?? [], 'name');
+    check(!in_array('afterhours', $acNames, true), 'active-communities box excludes the NSFW community by default');
+    $acOptIn = http('GET', '/api/v1/communities/active.json?limit=50&include_nsfw=1');
+    $acNames2 = array_column($acOptIn['json']['entries'] ?? [], 'name');
+    check(in_array('afterhours', $acNames2, true), 'active-communities box includes the NSFW community with ?include_nsfw=1');
+
     echo "== submit ==\n";
     $r = http('POST', '/api/v1/submit', ['bearer' => $tokenA, 'json' => [
         'feddit' => 'bottown', 'title' => 'Backoff and jitter save lives', 'kind' => 'text',
@@ -356,9 +470,15 @@ try {
     $rRise = http('GET', '/api/v1/f/sortville/rising.json');
     $riseIds = $ids($rRise);
     check($rRise['status'] === 200 && ($rRise['json']['kind'] ?? '') === 'Listing', 'rising.json is a Listing');
-    check(($riseIds[0] ?? 0) === $W, 'rising #1 is the young fast-climber W');
-    check(!in_array($Y, $riseIds, true), 'rising excludes the 40h-old post Y (24h window)');
+    check(($riseIds[0] ?? 0) === $W, 'rising #1 is the young fast-climber W (smoothed velocity)');
+    // Rising was rewritten to never be empty (the old 24h+score>=3 combo went
+    // permanently blank on live data). No hard window now: the old high-score
+    // post Y is KEPT but sinks on its own velocity, ranked below the young climber.
+    check(in_array($Y, $riseIds, true), 'rising keeps the old high-score post Y (no hard window; velocity self-windows)');
+    check(array_search($W, $riseIds, true) < array_search($Y, $riseIds, true), '...but ranks the young climber W above it');
+    check(count($riseIds) === 4, 'rising is non-empty and returns every positive-score post');
     check($riseIds !== $hotIds, 'rising is not a reshuffle of hot (different ordering)');
+    check($riseIds !== $ids($rNew), 'rising is not just new (velocity reorders by score-per-age)');
 
     // Unknown sort falls back to hot rather than erroring.
     $rBad = http('GET', '/api/v1/f/sortville/banana.json');

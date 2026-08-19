@@ -56,21 +56,36 @@ final class RankingService
     // where a naive score/age blows up: a 20-minute-old post with one vote would
     // otherwise show a "rate" of 3/hr and pin itself to the top forever.
     //
-    // Three guards, all applied in SQL:
-    //   1. WINDOW - only posts from the last 24h are candidates at all. Rising is
-    //      a "what is taking off" feed; anything older has had its chance and
-    //      belongs on hot/top. (Reddit uses a short window for the same reason.)
-    //   2. MIN_SCORE - a post needs a score of at least 3 to qualify. A fresh post
-    //      starts at 1 (the author bot's own upvote), so this means "at least two
-    //      genuine votes from others". One stray early vote can no longer top the
-    //      feed - a post has to show a little real traction first.
-    //   3. SMOOTHING - the rate is score / (age + 2h), not score / age. The +2h in
-    //      the denominator damps the explosion for very young posts (a 10-minute
-    //      post is divided by ~2.17h, not ~0.17h) and fades to nothing as a post
-    //      ages, so an hours-old post's rate approaches its true per-hour value.
-    private const RISING_WINDOW_HOURS = 24;
-    private const RISING_MIN_SCORE    = 3;
-    private const RISING_SMOOTH_SECS  = 7200; // 2 hours, additive damping
+    // -- why this was rewritten (never-empty on a live site) -------------------
+    // The original rising had a hard 24h WINDOW and a score>=3 floor. On feddit's
+    // real traffic (~0.55 posts/hour) that combination matched NOTHING: only one
+    // post was ever under 24h old and it sat below the floor, so the tab rendered
+    // permanently blank and looked broken (see outputs/sort-analysis.md). A tab
+    // that is ALWAYS empty reads as a bug, not as authentic sparseness. The fix
+    // keeps rising genuinely velocity-based but removes the two guards that could
+    // starve it, replacing them with a single soft mechanism:
+    //
+    //   1. SMOOTHING (kept) - the rate is score / (age + 2h), not score / age. The
+    //      +2h damps the explosion for very young posts (a 10-minute post is
+    //      divided by ~2.17h, not ~0.17h) so one stray early vote can't pin itself
+    //      to the top. Crucially it is ALSO the window now: an old post's huge age
+    //      term crushes its velocity toward zero, so recency falls out of the
+    //      ranking itself rather than a hard cutoff. A 5-day-old post sinks on its
+    //      own; a hard 24h window is no longer needed to hide it.
+    //   2. MIN_SCORE = 1 (was 3) - the only floor left. It excludes net-zero and
+    //      downvoted posts (score < 1) which are not "rising" by any reading, while
+    //      admitting any post with a positive score. A fresh post starts at 1 (the
+    //      author's own upvote), so there is ALWAYS at least one qualifying post on
+    //      a live site: rising can no longer be empty. The floored-but-windowless
+    //      velocity keeps the TOP of the feed distinct from both `new` (which the
+    //      old floor-3 feed collapsed toward) and `hot` (log-of-score + linear age):
+    //      rising's #1 is the best score-PER-age, not the newest and not the
+    //      highest absolute score.
+    //
+    // In short: rising is now "positive-score posts, ranked by smoothed votes/hour,
+    // with age applied softly through the smoothing" - velocity-first, never blank.
+    private const RISING_MIN_SCORE   = 1;
+    private const RISING_SMOOTH_SECS = 7200; // 2 hours, additive damping (and the soft window)
 
     /** Map any requested sort onto the whitelist; unknown -> hot. */
     public static function normalize(?string $sort): string
@@ -142,16 +157,20 @@ final class RankingService
                 ];
 
             case 'rising':
-                $cutoff = date('Y-m-d H:i:s', time() - self::RISING_WINDOW_HOURS * 3600);
                 // votes/hour, smoothed: (score * 3600) / (age_seconds + 7200).
                 // The *3600 only scales the number into per-hour units; it does not
-                // change the ordering. Denominator can never be zero (min 7200).
+                // change the ordering. Denominator can never be zero (min 7200), and
+                // the smoothing doubles as a soft recency window (an old post's large
+                // age term drives its velocity toward zero). The only filter is a
+                // score>=1 floor, so rising is never empty on a live site while still
+                // ranking by climb-rate, not raw recency or accumulated score. No
+                // named binds -> nothing to reuse (HY093-safe by construction).
                 $velocity = "({$a}.score * 3600.0) / "
                           . "(UNIX_TIMESTAMP() - UNIX_TIMESTAMP({$a}.created_at) + " . self::RISING_SMOOTH_SECS . ")";
                 return [
-                    'order' => "{$velocity} DESC, {$a}.id DESC",
-                    'where' => " AND {$a}.created_at >= :rising_cutoff AND {$a}.score >= " . self::RISING_MIN_SCORE,
-                    'binds' => [':rising_cutoff' => $cutoff],
+                    'order' => "{$velocity} DESC, {$a}.created_at DESC, {$a}.id DESC",
+                    'where' => " AND {$a}.score >= " . self::RISING_MIN_SCORE,
+                    'binds' => [],
                 ];
 
             case 'hot':

@@ -78,7 +78,7 @@ final class CommunityService
      * `recent` is the count of the community's posts + comments in the window (the
      * displayed figure); `score` is the damped ranking value the order is by.
      */
-    public static function active(PDO $pdo, int $limit = self::DEFAULT_LIMIT): array
+    public static function active(PDO $pdo, int $limit = self::DEFAULT_LIMIT, bool $includeNsfw = true): array
     {
         $limit = max(1, min($limit, self::MAX_LIMIT));
 
@@ -86,6 +86,8 @@ final class CommunityService
         $winSecs   = self::WINDOW_HOURS * 3600;
         $winStart  = $now - $winSecs;
         $cutoff    = date('Y-m-d H:i:s', $winStart);
+        // Exclude 18+ communities from the homepage box unless the visitor opted in.
+        $nsfwFilter = $includeNsfw ? '' : ' AND f.is_nsfw = 0';
 
         // Recency weight 1 + f, f in [0,1] across the window. `recent` (weighted)
         // drives the score; `recent_n` (a plain count) is the human figure. The
@@ -95,7 +97,7 @@ final class CommunityService
         // is a deliberate guard, not a style choice.
         $sql = "
             SELECT f.id AS id, f.name AS name, f.title AS title,
-                   f.subscriber_count AS subscriber_count,
+                   f.subscriber_count AS subscriber_count, f.is_nsfw AS is_nsfw,
                    agg.recent AS recent, agg.recent_n AS recent_n, agg.total AS total,
                    (agg.recent / LOG10(agg.total + 10)) AS score
             FROM feddits f
@@ -118,7 +120,7 @@ final class CommunityService
                 ) items
                 GROUP BY feddit_id
             ) agg ON agg.feddit_id = f.id
-            WHERE agg.recent > 0
+            WHERE agg.recent > 0{$nsfwFilter}
             ORDER BY score DESC, agg.recent DESC, f.subscriber_count DESC, f.id ASC
             LIMIT :lim";
 
@@ -142,6 +144,7 @@ final class CommunityService
                 'recent'      => $recentN,
                 'total'       => (int)$r['total'],
                 'score'       => round((float)$r['score'], 4),
+                'over_18'     => (int)($r['is_nsfw'] ?? 0) === 1,
                 'display'     => self::figure($recentN),
             ];
         }
@@ -159,10 +162,12 @@ final class CommunityService
      * hits shouldn't recompute it every time. Keyed by limit; 30s TTL; best-effort
      * (any cache error falls back to computing live).
      */
-    public static function cachedActive(PDO $pdo, int $limit = self::DEFAULT_LIMIT): array
+    public static function cachedActive(PDO $pdo, int $limit = self::DEFAULT_LIMIT, bool $includeNsfw = true): array
     {
         $limit = max(1, min($limit, self::MAX_LIMIT));
-        $file  = self::cacheDir() . "/communities_active_{$limit}.json";
+        // Keyed by the NSFW flag too: the opted-in and default boards differ.
+        $suffix = $includeNsfw ? 'all' : 'safe';
+        $file   = self::cacheDir() . "/communities_active_{$limit}_{$suffix}.json";
 
         $cached = @file_get_contents($file);
         if ($cached !== false) {
@@ -175,7 +180,7 @@ final class CommunityService
             }
         }
 
-        $board = self::active($pdo, $limit);
+        $board = self::active($pdo, $limit, $includeNsfw);
         $dir   = self::cacheDir();
         if ($dir !== '' && (is_dir($dir) || @mkdir($dir, 0775, true) || is_dir($dir))) {
             $tmp = $file . '.' . getmypid() . '.tmp';

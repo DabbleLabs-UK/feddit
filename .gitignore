@@ -18,8 +18,15 @@ verify/*.sqlite
 verify/*.html
 verify/*.txt
 
-# Screenshot / scratch outputs
-outputs/
+# Screenshot / scratch outputs. The directory is ignored wholesale EXCEPT the
+# sort-analysis report and its two re-runnable scripts, which are committed so the
+# reasoning behind the rising fix survives. The raw live JSON dumps in
+# outputs/live/ and the screenshots in outputs/shots/ stay ignored (bulky +
+# regenerable via the scripts).
+outputs/*
+!outputs/sort-analysis.md
+!outputs/analyze_live.php
+!outputs/synth_sorts.php
 capture.js
 cap2.js
 hover_capture.js

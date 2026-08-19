@@ -198,22 +198,62 @@ check($topB[0] === 'V', 'V (8000, 72h) is top #1 by raw score');
 $posV = array_search('V', $hotB, true);
 check($posV >= (int)floor(count($hotB) / 2), "...but hot sinks V into the bottom half (hot position {$posV})");
 
-echo "\n== rising: velocity, honest about small numbers, and NOT a reshuffle of hot ==\n";
+echo "\n== rising: velocity, never empty on a live site, and NOT a reshuffle of hot ==\n";
+// Rising was rewritten (see RankingService): score/(age+2h) smoothed velocity,
+// floored at score>=1, with NO hard time window (the smoothing self-windows old
+// posts). The old 24h-window + score>=3 combination rendered the tab permanently
+// blank on real traffic; this proves the new behaviour instead.
 $rising = ranked($pdo, 'rising', 1);
 report($pdo, 'rising', $rising);
+
+/** PHP reference for rising: smoothed votes/hour = score*3600 / (age_secs + 7200). */
+function rising_velocity(PDO $pdo, string $label): float
+{
+    global $NOW;
+    $st = $pdo->prepare("SELECT created_at, score FROM posts WHERE title = ? LIMIT 1");
+    $st->execute([$label]);
+    $r = $st->fetch();
+    $ageS = $NOW - strtotime((string)$r['created_at']);
+    return ((int)$r['score'] * 3600.0) / ($ageS + 7200);
+}
+// Exact order == the PHP velocity reference, over every score>=1 post (all of the
+// tiny sub qualifies), so a drift in the SQL expression fails the test.
+$refRise = array_values(array_filter(array_column($tiny, 0), fn($l) => score_of($pdo, $l) >= 1));
+usort($refRise, fn($x, $y) => rising_velocity($pdo, $y) <=> rising_velocity($pdo, $x));
+check($rising === $refRise, 'rising order == PHP smoothed-velocity reference');
+
 // G (18 min old, score 3) has the highest smoothed votes/hour and leads rising,
 // though it leads neither hot (A) nor top (C).
 check($rising[0] === 'G', 'rising surfaces the young fast-climbing post G first');
 check($rising[0] !== $hot[0], 'rising #1 differs from hot #1 (velocity, not accumulated score)');
 check($rising[0] !== $top[0], 'rising #1 differs from top #1');
-// The score floor (>=3): D has score 2 -> excluded even though it is very new.
-check(!in_array('D', $rising, true), 'rising excludes score-2 post D (min-score floor beats raw recency)');
-// The 24h window: C (26h) and E (50h) are excluded despite high scores.
-check(!in_array('C', $rising, true) && !in_array('E', $rising, true), 'rising excludes >24h posts C,E (recency window)');
-// Everything rising DID keep is recent and above the floor.
+check($rising !== $new, 'rising is not just new (velocity reorders by score-per-age)');
+// The score>=1 floor now ADMITS the young score-2 post D (the old floor-3 dropped
+// it); and the windowless velocity KEEPS the old high-score posts C,E but sinks
+// them to the bottom on their own, rather than a hard cutoff hiding them.
+check(in_array('D', $rising, true), 'rising now admits the young score-2 post D (floor lowered to 1)');
+check(in_array('C', $rising, true) && in_array('E', $rising, true), 'old posts C,E are kept but ranked low (soft window, not a hard cutoff)');
+$cPos = array_search('C', $rising, true); $ePos = array_search('E', $rising, true);
+check($cPos >= (int)floor(count($rising) / 2) && $ePos >= (int)floor(count($rising) / 2),
+    '...the old high-score posts sink into the bottom half of rising (velocity ~ 0)');
+// Every kept post is above the floor.
 $risingOk = true;
-foreach ($rising as $l) { if (age_h($pdo, $l) > 24 || score_of($pdo, $l) < 3) { $risingOk = false; } }
-check($risingOk, 'every rising post is <=24h old and score>=3');
+foreach ($rising as $l) { if (score_of($pdo, $l) < 1) { $risingOk = false; } }
+check($risingOk, 'every rising post has score>=1 (the only floor)');
+
+echo "\n== rising is NEVER empty when a live site has any positive post ==\n";
+// A deliberately hostile "quiet dormant sub": every post is old AND low-scored -
+// exactly the shape that made the old rising blank. Rising must still return them.
+$pdo->exec("CREATE TABLE IF NOT EXISTS posts_check AS SELECT * FROM posts WHERE 0");
+$insQ = $pdo->prepare("INSERT INTO posts (feddit_id,title,created_at,score,is_deleted) VALUES (9,?,?,?,0)");
+$insQ->execute(['OLD1', ago(200), 1]);   // ~8 days old, score 1
+$insQ->execute(['OLD2', ago(400), 2]);   // ~16 days old, score 2
+$insQ->execute(['ZEROQ', ago(30), 0]);   // score 0 -> below the floor
+$risingQuiet = ranked($pdo, 'rising', 9);
+report($pdo, 'rising(quiet)', $risingQuiet);
+check($risingQuiet !== [], 'rising on an all-old, all-low-score sub is still NON-empty (was blank before)');
+check(!in_array('ZEROQ', $risingQuiet, true), 'rising still excludes the score-0 post (floor holds)');
+check(count($risingQuiet) === 2, 'rising returns exactly the two positive-score posts');
 
 // -- best + controversial: genuine ups/downs, reconciled with the score --------
 //

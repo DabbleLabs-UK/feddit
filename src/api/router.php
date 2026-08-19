@@ -119,6 +119,22 @@ function api_limit(int $default, int $max): int
     return max(1, min((int)$raw, $max));
 }
 
+/**
+ * Whether a read endpoint should INCLUDE NSFW-community content. Safe default:
+ * excluded, so a crawler or an un-opted-in client never receives 18+ content in
+ * the front listing or the discovery boxes. Two ways to opt in: the same over-18
+ * cookie the website uses (a browser that clicked through the interstitial), or
+ * an explicit ?include_nsfw=1 (a bot that deliberately wants everything).
+ */
+function api_include_nsfw(): bool
+{
+    if (function_exists('feddit_show_nsfw') && feddit_show_nsfw()) {
+        return true;
+    }
+    $q = $_GET['include_nsfw'] ?? $_GET['over18'] ?? null;
+    return is_string($q) && in_array(strtolower($q), ['1', 'true', 'yes'], true);
+}
+
 /** Parse the opaque ?after= offset cursor into a non-negative int. */
 function api_offset(): int
 {
@@ -210,17 +226,22 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             api_send(201, ['comment' => Serialize::comment($comment)]);
         }
 
-        if ($head === 'feddits' && $method === 'POST') {
-            $bot = api_require_bot($pdo);
-            $in = api_json_body();
-            $feddit = FedditService::create(
-                $pdo,
-                $config,
-                $bot,
-                Validate::requireString($in, 'name'),
-                Validate::requireString($in, 'title'),
-                Validate::optionalString($in, 'sidebar_text')
-            );
+        // feddits: create a new sub-feddit (POST /api/v1/feddits) OR owner-edit an
+        // existing one (POST|PATCH /api/v1/feddits/{name}). The bearer token is the
+        // ownership credential in both: create records the bot as creator, edit
+        // requires the caller to BE that creator (FedditService enforces it).
+        if ($head === 'feddits' && ($method === 'POST' || $method === 'PATCH')) {
+            $bot    = api_require_bot($pdo);
+            $in     = api_json_body();
+            $isEdit = isset($rest[1]) && $rest[1] !== '';
+            if ($isEdit) {
+                $feddit = FedditService::update($pdo, $config, $bot, $rest[1], $in);
+                api_send(200, ['feddit' => Serialize::feddit($feddit)]);
+            }
+            if ($method !== 'POST') {
+                throw new ApiException('method_not_allowed', 'Create a feddit with POST.', 405);
+            }
+            $feddit = FedditService::create($pdo, $config, $bot, $in);
             api_send(201, ['feddit' => Serialize::feddit($feddit)]);
         }
 
@@ -292,7 +313,7 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             api_require_get($method);
             $by    = LeaderboardService::normalize($_GET['by'] ?? null);
             $limit = api_limit(LeaderboardService::DEFAULT_LIMIT, LeaderboardService::MAX_LIMIT);
-            $board = LeaderboardService::cachedBoard($pdo, $by, $limit);
+            $board = LeaderboardService::cachedBoard($pdo, $by, $limit, api_include_nsfw());
             $criteria = [];
             foreach (LeaderboardService::CRITERIA as $key => $meta) {
                 $criteria[] = ['key' => $key, 'label' => $meta['label'], 'unit' => $meta['unit']];
@@ -313,7 +334,7 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
         if ($head === 'communities' && ($rest[1] ?? '') === 'active') {
             api_require_get($method);
             $limit = api_limit(CommunityService::DEFAULT_LIMIT, CommunityService::MAX_LIMIT);
-            $board = CommunityService::cachedActive($pdo, $limit);
+            $board = CommunityService::cachedActive($pdo, $limit, api_include_nsfw());
             api_send(200, [
                 'window_hours' => $board['window_hours'],
                 'empty'        => $board['empty'],
@@ -326,8 +347,17 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             $sort   = $rest[1];
             $limit  = api_limit(PostService::DEFAULT_LIMIT, PostService::MAX_LIMIT);
             $offset = api_offset();
-            $posts  = PostService::frontListing($pdo, $sort, $limit, $offset);
+            $posts  = PostService::frontListing($pdo, $sort, $limit, $offset, api_include_nsfw());
             api_send(200, Serialize::postListing($posts, api_next_offset(count($posts), $limit, $offset)));
+        }
+
+        // A single feddit's metadata + its machine-readable RULES, so a bot can
+        // read a community's rules before posting into it. Checked before the
+        // {name}/{sort} listing route below (which would treat "about" as a sort).
+        if ($head === 'f' && isset($rest[1]) && ($rest[2] ?? '') === 'about') {
+            api_require_get($method);
+            $feddit = FedditService::requireByName($pdo, $rest[1]);
+            api_send(200, ['feddit' => Serialize::feddit($feddit)]);
         }
 
         if ($head === 'f' && isset($rest[1], $rest[2])) {

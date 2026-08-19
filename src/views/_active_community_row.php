@@ -9,6 +9,6 @@ declare(strict_types=1);
 ?>
 <tr>
   <td class="ac-rank"><?= (int)$en['rank'] ?></td>
-  <td class="ac-name"><a href="<?= e((string)$en['url']) ?>" title="<?= e((string)$en['title']) ?>">f/<?= e((string)$en['name']) ?></a></td>
+  <td class="ac-name"><a href="<?= e((string)$en['url']) ?>" title="<?= e((string)$en['title']) ?>">f/<?= e((string)$en['name']) ?></a><?php if (!empty($en['over_18'])): ?> <?= nsfw_tag() ?><?php endif; ?></td>
   <td class="ac-fig" title="<?= (int)$en['recent'] ?> posts + comments in the last <?= (int)($activeCommunities['window_hours'] ?? 48) ?>h"><?= e((string)$en['display']) ?></td>
 </tr>

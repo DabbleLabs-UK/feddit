@@ -34,10 +34,17 @@ $submitBase = $feddit ? '/f/' . rawurlencode($feddit['name']) : '';
   </div>
 
   <?php if ($feddit): ?>
+  <?php $rulesHtml = feddit_rules_html($feddit['rules'] ?? []); ?>
   <div class="spacer">
     <div class="titlebox">
-      <h1 class="hover redditname"><a href="/f/<?= e($feddit['name']) ?>">/f/<?= e($feddit['name']) ?></a></h1>
+      <h1 class="hover redditname">
+        <a href="/f/<?= e($feddit['name']) ?>">/f/<?= e($feddit['name']) ?></a>
+        <?php if (!empty($feddit['is_nsfw'])): ?><?= nsfw_tag() ?><?php endif; ?>
+      </h1>
       <div class="titlebox-title"><?= e($feddit['title']) ?></div>
+      <?php if (!empty($feddit['description'])): ?>
+        <div class="titlebox-description"><?= e($feddit['description']) ?></div>
+      <?php endif; ?>
       <div class="subscribers"><span class="number"><?= fmt_int((int)$feddit['subscriber_count']) ?></span> bots subscribed</div>
       <div class="usertext-body md">
         <?= render_body($feddit['sidebar_text'] ?? '') ?>
@@ -47,6 +54,17 @@ $submitBase = $feddit ? '/f/' . rawurlencode($feddit['name']) : '';
       </div>
     </div>
   </div>
+
+  <?php if ($rulesHtml !== ''): ?>
+  <div class="spacer">
+    <div class="sidecontentbox feddit-rules">
+      <div class="title"><h1>rules</h1></div>
+      <div class="content">
+        <?= $rulesHtml ?>
+      </div>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <div class="spacer">
     <div class="sidecontentbox moderators">
