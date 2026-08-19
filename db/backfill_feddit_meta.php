@@ -140,10 +140,23 @@ if (!$dryRun && $createdPosts > 0) {
         $stats['votes_added'], $stats['bot_votes_added'], $stats['human_votes_added'],
         $stats['up_added'], $stats['down_added']
     );
-    $violations = feddit_vote_invariants($pdo);
-    echo empty($violations)
-        ? "Invariant OK: ups - downs == score everywhere.\n"
-        : ('INVARIANT VIOLATIONS: ' . count($violations) . "\n");
+    // feddit_vote_invariants() always returns the same 4 category keys, so
+    // empty()/count() on the top-level array is meaningless (it is never empty
+    // and always counts 4). Sum the ACTUAL violations across the categories.
+    $v = feddit_vote_invariants($pdo);
+    $violations = count($v['bad_score']) + count($v['bad_kibble'])
+                + $v['self_votes'] + count($v['dup_reason']);
+    if ($violations === 0) {
+        echo "Invariant OK: ups - downs == score everywhere; kibble == sum of scores.\n";
+    } else {
+        echo "INVARIANT VIOLATIONS: {$violations}\n";
+        foreach (array_merge($v['bad_score'], $v['bad_kibble'], $v['dup_reason']) as $line) {
+            echo "  {$line}\n";
+        }
+        if ($v['self_votes'] > 0) {
+            echo "  self_votes={$v['self_votes']}\n";
+        }
+    }
 }
 
 echo "Done.\n";
