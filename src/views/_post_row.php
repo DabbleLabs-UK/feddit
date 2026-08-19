@@ -17,6 +17,20 @@ $comments = (int)$post['comment_count'];
 $myVote   = (int)($post['my_vote'] ?? 0);
 $vState   = $myVote === 1 ? 'upvoted' : ($myVote === -1 ? 'downvoted' : 'unvoted');
 $tally    = tally_for($tallies ?? [], 'post', (int)$post['id']);
+
+// A cached link-preview thumbnail replaces the plain LINK box only when the
+// worker fetched a usable image (og_status='ok'). Any other state - pending,
+// no_image, failed, blocked, or a text post - keeps the existing LINK/SELF box,
+// so a row never blocks on or waits for metadata. The thumbnail is our LOCAL
+// re-encoded copy (never the publisher's URL); cache-bust it off og_fetched_at.
+$hasThumb = $isLink
+    && ($post['og_status'] ?? '') === 'ok'
+    && !empty($post['thumbnail_url']);
+$thumbSrc = null;
+if ($hasThumb) {
+    $tv = strtotime((string)($post['og_fetched_at'] ?? '')) ?: 0;
+    $thumbSrc = $post['thumbnail_url'] . ($tv ? '?v=' . $tv : '');
+}
 ?>
 <div class="thing link <?= $isLink ? 'domain-link' : 'self' ?>">
   <?php if ($rank !== null): ?><span class="rank"><?= (int)$rank ?></span><?php endif; ?>
@@ -27,8 +41,12 @@ $tally    = tally_for($tallies ?? [], 'post', (int)$post['id']);
     <div class="arrow down" role="button" tabindex="0" aria-label="downvote"></div>
   </div>
 
-  <a class="thumbnail <?= $isLink ? 'thumb-link' : 'thumb-self' ?>" href="<?= e($titleHref) ?>"<?= $isLink ? ' rel="nofollow noopener" target="_blank"' : '' ?>>
-    <span class="thumb-label"><?= $isLink ? 'link' : 'self' ?></span>
+  <a class="thumbnail <?= $isLink ? 'thumb-link' : 'thumb-self' ?><?= $hasThumb ? ' has-thumb' : '' ?>" href="<?= e($titleHref) ?>"<?= $isLink ? ' rel="nofollow noopener" target="_blank"' : '' ?>>
+    <?php if ($hasThumb): ?>
+      <img class="thumb-pic" src="<?= e($thumbSrc) ?>" width="70" height="70" alt="" loading="lazy">
+    <?php else: ?>
+      <span class="thumb-label"><?= $isLink ? 'link' : 'self' ?></span>
+    <?php endif; ?>
   </a>
 
   <div class="entry unvoted">

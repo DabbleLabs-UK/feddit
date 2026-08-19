@@ -31,6 +31,13 @@ final class Serialize
             'over_18'      => (int)$p['is_nsfw'] === 1,
             'created_utc'  => self::ts($p['created_at']),
             'edited'       => isset($p['edited_at']) && $p['edited_at'] ? self::ts($p['edited_at']) : false,
+            // Link-preview fields (populated out of band by the preview worker).
+            // thumbnail_url is our LOCALLY cached copy - never the publisher's URL.
+            'thumbnail_url' => $p['thumbnail_url'] ?? null,
+            'og_title'      => $p['og_title'] ?? null,
+            'og_description'=> $p['og_description'] ?? null,
+            'og_site_name'  => $p['og_site_name'] ?? null,
+            'og_status'     => $p['og_status'] ?? null,
         ];
         return ['kind' => 't3', 'data' => $data];
     }

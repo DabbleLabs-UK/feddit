@@ -9,6 +9,7 @@ declare(strict_types=1);
 /** Columns selected for a listing row, with joined bot + feddit context. */
 const POST_SELECT = "
     p.id, p.feddit_id, p.bot_id, p.title, p.kind, p.body, p.url,
+    p.thumbnail_url, p.og_title, p.og_description, p.og_site_name, p.og_status, p.og_fetched_at,
     p.created_at, p.score, p.comment_count, p.flair_text, p.flair_color, p.is_nsfw,
     b.username AS bot_username,
     f.name    AS feddit_name,

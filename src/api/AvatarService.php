@@ -126,15 +126,9 @@ final class AvatarService
             throw ApiException::validation('That file is not a supported image (PNG, JPEG, GIF or WebP).');
         }
 
-        $src = @imagecreatefromstring($bytes);
-        if (!$src) {
+        $png = self::reencodeSquarePng($bytes, self::SIZE);
+        if ($png === null) {
             throw ApiException::validation('That image could not be decoded.');
-        }
-
-        try {
-            $square = self::squareResample($src);
-        } finally {
-            imagedestroy($src);
         }
 
         $dir = self::dir();
@@ -146,12 +140,43 @@ final class AvatarService
         // half-written PNG and the deterministic name flips atomically.
         $target = self::path($botId);
         $tmp    = $target . '.tmp';
-        $ok = imagepng($square, $tmp, 6);
-        imagedestroy($square);
-        if (!$ok || !@rename($tmp, $target)) {
+        if (@file_put_contents($tmp, $png) === false || !@rename($tmp, $target)) {
             @unlink($tmp);
             throw new ApiException('unavailable', 'Could not store the avatar.', 503);
         }
+    }
+
+    /**
+     * The shared image pipeline: prove the bytes are a real supported image by
+     * INSPECTING them (never a declared type), centre-crop to a square, resample
+     * to $size and emit a fresh PNG carrying no source metadata. Returns the PNG
+     * bytes, or null if the input is not a decodable supported image. Reused by
+     * both the avatar upload and the link-preview thumbnail cache so there is one
+     * hardened re-encode, not two. Requires GD; returns null if GD is absent.
+     */
+    public static function reencodeSquarePng(string $bytes, int $size): ?string
+    {
+        if (!function_exists('imagecreatefromstring')) {
+            return null;
+        }
+        $info = @getimagesizefromstring($bytes);
+        if ($info === false || !isset($info[2]) || !in_array($info[2], self::ALLOWED_TYPES, true)) {
+            return null;
+        }
+        $src = @imagecreatefromstring($bytes);
+        if (!$src) {
+            return null;
+        }
+        try {
+            $square = self::squareResample($src, max(1, $size));
+        } finally {
+            imagedestroy($src);
+        }
+        ob_start();
+        $ok = imagepng($square, null, 6);
+        $png = ob_get_clean();
+        imagedestroy($square);
+        return ($ok && is_string($png) && $png !== '') ? $png : null;
     }
 
     /** Delete a bot's avatar file if present. Best-effort; never throws. */
@@ -168,7 +193,7 @@ final class AvatarService
      * transparent canvas (so a PNG with alpha keeps it). The output GD image is
      * a fresh truecolor buffer carrying no metadata from the original.
      */
-    private static function squareResample(\GdImage $src): \GdImage
+    private static function squareResample(\GdImage $src, int $size = self::SIZE): \GdImage
     {
         $w = imagesx($src);
         $h = imagesy($src);
@@ -176,14 +201,14 @@ final class AvatarService
         $sx = (int)floor(($w - $side) / 2);
         $sy = (int)floor(($h - $side) / 2);
 
-        $dst = imagecreatetruecolor(self::SIZE, self::SIZE);
+        $dst = imagecreatetruecolor($size, $size);
         imagealphablending($dst, false);
         imagesavealpha($dst, true);
         $transparent = imagecolorallocatealpha($dst, 0, 0, 0, 127);
-        imagefilledrectangle($dst, 0, 0, self::SIZE, self::SIZE, $transparent);
+        imagefilledrectangle($dst, 0, 0, $size, $size, $transparent);
         imagealphablending($dst, true);
 
-        imagecopyresampled($dst, $src, 0, 0, $sx, $sy, self::SIZE, self::SIZE, $side, $side);
+        imagecopyresampled($dst, $src, 0, 0, $sx, $sy, $size, $size, $side, $side);
         imagesavealpha($dst, true);
         return $dst;
     }

@@ -68,6 +68,16 @@ CREATE TABLE posts (
     kind          ENUM('text','link') NOT NULL DEFAULT 'text',
     body          TEXT         NULL,          -- self-text for kind='text'
     url           VARCHAR(2048) NULL,         -- target for kind='link'
+    -- Link-preview columns, populated OUT OF BAND by db/og_worker.php (never in
+    -- the submit request). The worker fetches ONLY the target's <head> - never
+    -- article body text - so paywalled pages are handled ethically by construction.
+    thumbnail_url  VARCHAR(255)  NULL,         -- served path of the LOCALLY cached, re-encoded thumbnail (/thumb/{id}.png); we cache, never hotlink
+    og_title       VARCHAR(512)  NULL,         -- og:title / twitter:title / <title>
+    og_description VARCHAR(1024) NULL,         -- og:description / twitter:description
+    og_site_name   VARCHAR(255)  NULL,         -- og:site_name
+    og_fetched_at  DATETIME      NULL,         -- timestamp of the LAST fetch attempt (freshness + retry backoff)
+    og_status      VARCHAR(16)   NULL,         -- pending|ok|no_image|failed|blocked|skipped; NULL on text posts
+    og_attempts    TINYINT UNSIGNED NOT NULL DEFAULT 0,  -- attempt counter: the worker backs off and gives up
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     score         INT          NOT NULL DEFAULT 1,
     comment_count INT          NOT NULL DEFAULT 0,
@@ -82,6 +92,8 @@ CREATE TABLE posts (
     KEY idx_posts_created (created_at),
     KEY idx_posts_bot (bot_id),
     KEY idx_posts_deleted (is_deleted),
+    KEY idx_posts_og_status (og_status),        -- the worker's claim scan
+
     -- Full-text search over titles + self-text. The API's search endpoint uses
     -- LIKE (portable to the SQLite verify harness); this index is here so a
     -- future switch to MATCH ... AGAINST is a one-line query change, no migration.

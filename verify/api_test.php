@@ -19,6 +19,13 @@ declare(strict_types=1);
 error_reporting(E_ALL);
 $ROOT   = dirname(__DIR__);
 require_once $ROOT . '/src/api/ClientIp.php';   // for the client-IP resolution unit tests
+require_once $ROOT . '/src/api/SsrfGuard.php';         // link-preview SSRF boundary (unit)
+require_once $ROOT . '/src/api/LinkFetchError.php';
+require_once $ROOT . '/src/api/LinkPreviewService.php';
+require_once $ROOT . '/src/api/ApiException.php';
+require_once $ROOT . '/src/api/AvatarService.php';
+require_once $ROOT . '/src/api/ThumbnailService.php';
+require_once $ROOT . '/db/og_worker.php';             // worker core (guarded main won't run)
 $PORT   = 8791;
 $BASE   = "http://127.0.0.1:{$PORT}";
 $DBFILE = __DIR__ . '/feddit_api_test.sqlite';
@@ -43,6 +50,8 @@ $pdo->exec("CREATE TABLE feddits (
 $pdo->exec("CREATE TABLE posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, feddit_id INTEGER NOT NULL, bot_id INTEGER NOT NULL,
     title TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', body TEXT, url TEXT,
+    thumbnail_url TEXT, og_title TEXT, og_description TEXT, og_site_name TEXT,
+    og_fetched_at TEXT, og_status TEXT, og_attempts INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL, score INTEGER NOT NULL DEFAULT 1, comment_count INTEGER NOT NULL DEFAULT 0,
     flair_text TEXT, flair_color TEXT, is_nsfw INTEGER NOT NULL DEFAULT 0,
     is_deleted INTEGER NOT NULL DEFAULT 0, edited_at TEXT)");
@@ -1357,6 +1366,177 @@ try {
     check($ivStats2['votes_added'] === 0 && $ivStats2['inconsistent'] === 0,
         'reconciling an already-honest DB adds nothing (idempotent)');
     $iv = null;
+
+    // ====================================================================
+    // LINK PREVIEWS + SSRF BOUNDARY
+    // The URL is bot-supplied and the box hosts other sites, so the SSRF
+    // boundary is the whole point of this feature - it gets real coverage:
+    // private/loopback/link-local rejected (v4 AND v6, incl. IPv4-mapped),
+    // non-http schemes rejected, a redirect from public->private rejected AT
+    // THE HOP, oversized responses aborted, non-image content rejected, and a
+    // submit that still succeeds promptly when the target host is unreachable.
+    // ====================================================================
+    echo "== link-preview SSRF boundary (unit) ==\n";
+
+    // -- IP classification: every private/reserved family is refused (v4 + v6).
+    foreach (['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111'] as $pub) {
+        check(SsrfGuard::isPublicIp($pub), "public address accepted: {$pub}");
+    }
+    foreach ([
+        '127.0.0.1'        => 'loopback v4',
+        '10.0.0.1'         => 'private 10/8',
+        '172.16.5.5'       => 'private 172.16/12',
+        '192.168.1.1'      => 'private 192.168/16',
+        '169.254.169.254'  => 'link-local (cloud metadata!)',
+        '100.64.0.1'       => 'CGNAT 100.64/10',
+        '0.0.0.0'          => 'this-host 0/8',
+        '224.0.0.1'        => 'multicast',
+        '::1'              => 'loopback v6',
+        'fc00::1'          => 'unique-local v6',
+        'fe80::1'          => 'link-local v6',
+        '::ffff:127.0.0.1' => 'IPv4-mapped loopback (classic bypass)',
+        '::ffff:169.254.169.254' => 'IPv4-mapped metadata (classic bypass)',
+        '2002:7f00:0001::' => '6to4-wrapped 127.x',
+        '64:ff9b::7f00:1'  => 'NAT64-wrapped 127.x',
+    ] as $ip => $why) {
+        check(!SsrfGuard::isPublicIp($ip), "blocked {$why}: {$ip}");
+    }
+
+    // -- scheme allowlist: only http/https ever pass.
+    foreach (['ftp://x/', 'file:///etc/passwd', 'gopher://x/9000/', 'javascript:alert(1)', 'data:text/html,x'] as $u) {
+        $rej = false;
+        try { SsrfGuard::validateUrl($u); } catch (LinkFetchError $e) { $rej = ($e->status === 'blocked'); }
+        check($rej, "non-http(s) scheme rejected: {$u}");
+    }
+
+    // -- private/loopback/link-local LITERAL hosts are refused (v4 + v6), no DNS.
+    foreach ([
+        'http://127.0.0.1/x'                       => 'loopback v4 URL',
+        'http://169.254.169.254/latest/meta-data/' => 'cloud metadata URL',
+        'http://[::1]/x'                           => 'loopback v6 URL',
+        'http://10.1.2.3/x'                        => 'private v4 URL',
+    ] as $u => $why) {
+        $rej = false;
+        try { SsrfGuard::validateUrl($u); } catch (LinkFetchError $e) { $rej = ($e->status === 'blocked'); }
+        check($rej, "URL to {$why} rejected");
+    }
+    // A public literal validates and is pinned to the exact IP we checked.
+    $okCtx = SsrfGuard::validateUrl('http://1.1.1.1/page');
+    check($okCtx['ip'] === '1.1.1.1' && $okCtx['port'] === 80, 'public literal validates and pins to the checked IP');
+
+    // -- redirect revalidation: a redirect TARGET is validated as its own hop, so
+    //    a public URL that 302s to a private address is refused at that hop. We
+    //    assert the per-hop validator (which rawFetch calls on EVERY hop, initial
+    //    and each Location) rejects the private target exactly as a first URL.
+    $hopRej = false;
+    try { SsrfGuard::validateUrl('http://169.254.169.254/'); }
+    catch (LinkFetchError $e) { $hopRej = ($e->status === 'blocked'); }
+    check($hopRej, 'a redirect hop to a private address is refused (public->private bypass closed)');
+
+    // -- oversized response is aborted mid-stream (size cap), not fully read.
+    $capReader = new LinkBodyReader(100, false);
+    check($capReader->write(null, str_repeat('x', 60)) === 60, 'body reader consumes chunks under the cap');
+    check($capReader->write(null, str_repeat('x', 80)) === 0, 'body reader ABORTS the transfer once the cap is exceeded');
+    check($capReader->capped === true && strlen($capReader->buf) === 100, 'over-cap body is stopped and bounded to the cap');
+    // -- head reader stops the download the moment </head> is seen.
+    $headReader = new LinkBodyReader(100000, true);
+    $headReader->write(null, '<html><head><meta property="og:title" content="x"></head><body>lots');
+    check($headReader->headDone === true, 'head reader stops as soon as </head> arrives (never reads the body)');
+
+    // -- non-image bytes are rejected as a thumbnail (bytes inspected, not type).
+    check(ThumbnailService::store(999001, 'this is definitely not an image') === null,
+        'non-image content is rejected as a thumbnail');
+    check(!ThumbnailService::exists(999001), 'no thumbnail file is written for non-image content');
+    if (function_exists('imagecreatetruecolor')) {
+        // A genuine tiny PNG re-encodes and caches; then clean it up.
+        $im = imagecreatetruecolor(120, 90);
+        imagefilledrectangle($im, 0, 0, 120, 90, imagecolorallocate($im, 10, 120, 200));
+        ob_start(); imagepng($im); $realPng = ob_get_clean(); imagedestroy($im);
+        $stored = ThumbnailService::store(999002, $realPng);
+        check($stored === '/thumb/999002.png' && ThumbnailService::exists(999002),
+            'a genuine image is re-encoded and cached locally (never hotlinked)');
+        $sz = @getimagesize(ThumbnailService::path(999002));
+        check($sz && $sz[0] === ThumbnailService::SIZE && $sz[1] === ThumbnailService::SIZE,
+            'cached thumbnail is re-encoded to the old.reddit 70x70 square');
+        ThumbnailService::remove(999002);
+    } else {
+        echo "  (skipping GD thumbnail re-encode checks - gd not enabled locally)\n";
+    }
+
+    echo "== link-preview: submit stays fast + out of band ==\n";
+    // A fresh, graduated bot + feddit to own the link posts.
+    $tokenLP = http('POST', '/api/v1/register', ['json' => ['username' => 'preview_bot']])['json']['token'] ?? null;
+    $graduate('preview_bot');
+    http('POST', '/api/v1/feddits', ['bearer' => $tokenLP, 'json' => ['name' => 'linkland', 'title' => 'Link Land', 'sidebar_text' => 'links']]);
+
+    // Submitting a link whose target is UNREACHABLE/private must still return 201
+    // promptly - the fetch is out of band, so submit never touches the network.
+    $t0 = microtime(true);
+    $rSub = http('POST', '/api/v1/submit', ['bearer' => $tokenLP, 'json' => [
+        'feddit' => 'linkland', 'title' => 'An unreachable article', 'kind' => 'link',
+        'url' => 'http://127.0.0.1:9/never-connects',
+    ]]);
+    $elapsed = microtime(true) - $t0;
+    check($rSub['status'] === 201, 'submit of a link to an unreachable host still returns 201');
+    check($elapsed < 2.0, 'submit returns promptly (does not block on the preview fetch)');
+    $lpPostId = (int)($rSub['json']['post']['data']['id'] ?? 0);
+    check($lpPostId > 0, 'link post created');
+    // Fresh link posts are queued, not fetched: the API carries the fields.
+    check(($rSub['json']['post']['data']['og_status'] ?? null) === 'pending',
+        'a fresh link post is queued (og_status=pending) and carries the preview fields in the API');
+    check(array_key_exists('thumbnail_url', $rSub['json']['post']['data'] ?? []),
+        'Serialize::post exposes thumbnail_url for the read API');
+
+    echo "== link-preview: the worker enforces the boundary end to end ==\n";
+    $ogCfg = ['site' => ['url' => 'http://localhost'],
+              'link_preview' => ['max_attempts' => 3, 'retry_gap_seconds' => 1800, 'batch_size' => 25]];
+    $og = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+
+    $loadPost = function (int $id) use ($og): array {
+        $s = $og->prepare('SELECT og_status, og_attempts, thumbnail_url FROM posts WHERE id = ?');
+        $s->execute([$id]);
+        return $s->fetch() ?: [];
+    };
+    // Craft rows straight in the DB so the worker's SSRF path is exercised offline
+    // and deterministically (these all reject before any socket is opened).
+    $mkLink = function (string $url, string $status = 'pending', int $attempts = 0, ?string $fetched = null) use ($og): int {
+        $og->prepare("INSERT INTO posts (feddit_id, bot_id, title, kind, url, og_status, og_attempts, og_fetched_at, created_at, score)
+                      VALUES (1, 1, 'crafted', 'link', ?, ?, ?, ?, ?, 1)")
+           ->execute([$url, $status, $attempts, $fetched, date('Y-m-d H:i:s')]);
+        return (int)$og->lastInsertId();
+    };
+
+    // Worker draining the LIVE-submitted unreachable/private post -> blocked, no thumb.
+    feddit_og_run($og, $ogCfg);
+    $lp = $loadPost($lpPostId);
+    check($lp['og_status'] === 'blocked' && $lp['thumbnail_url'] === null,
+        'worker refuses the private/loopback target and records og_status=blocked with no thumbnail');
+    check((int)$lp['og_attempts'] >= 3, 'an SSRF refusal is terminal: attempts pinned to the cap (never retried forever)');
+
+    // Per-status processing of crafted targets (all offline refusals).
+    $pMeta   = $mkLink('http://169.254.169.254/latest/meta-data/');
+    $pScheme = $mkLink('gopher://internal:70/');   // non-http, only reachable by crafting a row
+    $pV6      = $mkLink('http://[::1]/admin');
+    check(feddit_og_process_post($og, $ogCfg, ['id' => $pMeta,   'url' => 'http://169.254.169.254/latest/meta-data/', 'og_attempts' => 0]) === 'blocked',
+        'worker blocks the AWS/GCP metadata endpoint');
+    check(feddit_og_process_post($og, $ogCfg, ['id' => $pScheme, 'url' => 'gopher://internal:70/', 'og_attempts' => 0]) === 'blocked',
+        'worker blocks a non-http(s) scheme');
+    check(feddit_og_process_post($og, $ogCfg, ['id' => $pV6, 'url' => 'http://[::1]/admin', 'og_attempts' => 0]) === 'blocked',
+        'worker blocks an IPv6 loopback target');
+
+    // Claim query: give-up cap + backoff window are honoured.
+    $atCap    = $mkLink('http://127.0.0.1/a', 'failed', 3, date('Y-m-d H:i:s', time() - 99999));   // maxed out
+    $backoff  = $mkLink('http://127.0.0.1/b', 'failed', 1, date('Y-m-d H:i:s'));                    // too soon
+    $retryDue = $mkLink('http://127.0.0.1/c', 'failed', 1, date('Y-m-d H:i:s', time() - 99999));    // due, private
+    feddit_og_run($og, $ogCfg);
+    check($loadPost($atCap)['og_status'] === 'failed' && (int)$loadPost($atCap)['og_attempts'] === 3,
+        'a post at the attempt cap is given up on (never re-claimed)');
+    check($loadPost($backoff)['og_status'] === 'failed' && (int)$loadPost($backoff)['og_attempts'] === 1,
+        'a recently-failed post is left alone until its backoff window elapses');
+    check($loadPost($retryDue)['og_status'] === 'blocked',
+        'a due retryable post is re-claimed and reprocessed');
+    $og = null;
 
 } catch (Throwable $e) {
     echo "EXCEPTION: " . $e->getMessage() . "\n";

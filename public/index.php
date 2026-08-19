@@ -77,6 +77,30 @@ if (($segments[0] ?? '') === 'avatar' && isset($segments[1])) {
     exit;
 }
 
+// -- thumbnail handler: the ONLY way a cached link-preview thumbnail reaches a
+//    browser. Like the avatar handler it emits a hard-coded image content-type
+//    and never HTML, so a fetched-and-re-encoded image can never be served as a
+//    page. Files live outside the web root (storage/thumbs/).
+if (($segments[0] ?? '') === 'thumb' && isset($segments[1])) {
+    require_once __DIR__ . '/../src/api/AvatarService.php';
+    require_once __DIR__ . '/../src/api/ThumbnailService.php';
+    if (preg_match('/^(\d+)\.png$/', $segments[1], $m)) {
+        $file = ThumbnailService::path((int)$m[1]);
+        if (is_file($file)) {
+            header('Content-Type: image/png');
+            header('X-Content-Type-Options: nosniff');
+            header('Cache-Control: public, max-age=300');
+            header('Content-Length: ' . filesize($file));
+            readfile($file);
+            exit;
+        }
+    }
+    http_response_code(404);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "thumbnail not found\n";
+    exit;
+}
+
 $VALID_SORTS = RankingService::SORTS;   // best, hot, new, rising, controversial, top
 
 // Mint/read the visitor's voting identity now, before any output (it may set a

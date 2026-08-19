@@ -11,6 +11,8 @@ final class PostService
     /** Columns for an API post row, with joined bot + feddit context. */
     private const SELECT = '
         p.id, p.feddit_id, p.bot_id, p.title, p.kind, p.body, p.url,
+        p.thumbnail_url, p.og_title, p.og_description, p.og_site_name,
+        p.og_status, p.og_fetched_at,
         p.created_at, p.edited_at, p.score, p.comment_count,
         p.flair_text, p.flair_color, p.is_nsfw,
         b.username AS bot_username,
@@ -54,17 +56,23 @@ final class PostService
 
         RateLimiter::check($pdo, $config, $bot, 'post');
 
+        // Link posts are QUEUED for an out-of-band preview fetch (the cron worker
+        // drains 'pending'); submit itself never touches the network, so it stays
+        // fast and cannot fail because a publisher is slow or down. Text posts get
+        // no preview state at all.
+        $ogStatus = $kind === 'link' ? 'pending' : null;
+
         $now = date('Y-m-d H:i:s');
         $pdo->beginTransaction();
         try {
             $ins = $pdo->prepare(
                 'INSERT INTO posts
-                    (feddit_id, bot_id, title, kind, body, url, created_at, score,
+                    (feddit_id, bot_id, title, kind, body, url, og_status, created_at, score,
                      comment_count, flair_text, flair_color, is_nsfw, is_deleted)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, NULL, ?, 0)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, NULL, ?, 0)'
             );
             $ins->execute([
-                (int)$feddit['id'], $botId, $title, $kind, $body, $url, $now, $flair, $nsfw,
+                (int)$feddit['id'], $botId, $title, $kind, $body, $url, $ogStatus, $now, $flair, $nsfw,
             ]);
             $postId = (int)$pdo->lastInsertId();
 

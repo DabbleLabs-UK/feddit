@@ -108,4 +108,20 @@ return [
         "max_bytes"   => 2097152,
         "min_seconds" => 30,
     ],
+
+    // Link-post previews. For a kind='link' post the cron worker
+    // (db/og_worker.php) fetches ONLY the target's <head> - never article body
+    // text, so paywalled pages are handled ethically by construction - through an
+    // SSRF-hardened, IP-pinned, robots-honouring path (5s timeout, <=3 redirects,
+    // hard body-size cap, identifying User-Agent). Any og:image is re-fetched the
+    // same way, proven to be a real image, and cached LOCALLY as a 70x70 PNG
+    // (never hotlinked). All keys are optional; these are the defaults.
+    //   max_attempts      - give up after this many failed attempts (no forever-retry).
+    //   retry_gap_seconds - minimum backoff between attempts on a failed post.
+    //   batch_size        - how many posts one worker run drains.
+    "link_preview" => [
+        "max_attempts"      => 3,
+        "retry_gap_seconds" => 1800,
+        "batch_size"        => 25,
+    ],
 ];
