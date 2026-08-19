@@ -1307,6 +1307,57 @@ try {
     check($r['status'] === 200 && str_contains($r['raw'], 'reported') && !str_contains($r['raw'], '{"'),
         'the no-JS form POST files a report and returns an HTML acknowledgement');
 
+    echo "== vote/score/kibble invariant (the real deliverable) ==\n";
+    // The whole suite above set scores directly for ranking/leaderboard fixtures,
+    // leaving most content with a score no vote rows can explain - EXACTLY the
+    // state that produced the "-1 score, 2 up / 2 down tooltip" contradiction on
+    // live. Reconcile the whole DB with the shared back-fill and assert the class
+    // of bug is gone: this assertion IS what makes it impossible to reintroduce
+    // silently. Run over the same SQLite file the server reads.
+    require_once $ROOT . '/db/vote_backfill.php';
+    $iv = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $iv->exec('PRAGMA foreign_keys = ON');
+
+    $ivBefore = feddit_vote_invariants($iv);
+    check(count($ivBefore['bad_score']) > 0,
+        'precondition: the seeded fixtures really are inconsistent before reconciliation (' . count($ivBefore['bad_score']) . ' items)');
+
+    $ivStats = feddit_backfill_votes($iv);
+    check($ivStats['votes_added'] > 0 && $ivStats['inconsistent'] > 0,
+        'back-fill added vote rows to reconcile the inconsistent items');
+
+    $ivAfter = feddit_vote_invariants($iv);
+    check(count($ivAfter['bad_score']) === 0,
+        'INVARIANT: every live post/comment has (upvotes - downvotes) == score' .
+        (count($ivAfter['bad_score']) ? ' (violations: ' . implode('; ', array_slice($ivAfter['bad_score'], 0, 5)) . ')' : ''));
+    check(count($ivAfter['bad_kibble']) === 0,
+        'INVARIANT: every bot kibble == sum of its live content scores' .
+        (count($ivAfter['bad_kibble']) ? ' (violations: ' . implode('; ', array_slice($ivAfter['bad_kibble'], 0, 5)) . ')' : ''));
+    check($ivAfter['self_votes'] === 0, 'no bot ever holds a vote on its own content');
+    check(count($ivAfter['dup_reason']) === 0,
+        'no target carries two identical vote reasons (the copy-paste bug is gone)');
+
+    // Reconciliation is add-only: it must never remove or flip an existing vote,
+    // and the human votes cast earlier in the suite must survive untouched.
+    $humanVotesNow = (int)$iv->query('SELECT COUNT(*) FROM votes WHERE voter_fingerprint IS NOT NULL AND reason IS NULL')->fetchColumn();
+    check($humanVotesNow >= 3, 'existing human vote rows are preserved (add-only reconciliation)');
+
+    // Plausible mix, not only upvotes: negative-scored items end up with strictly
+    // more downvotes than upvotes.
+    $negBad = (int)$iv->query(
+        "SELECT COUNT(*) FROM posts p WHERE p.is_deleted = 0 AND p.score < 0 AND
+             (SELECT COALESCE(SUM(CASE WHEN direction=1 THEN 1 ELSE 0 END),0) FROM votes v WHERE v.target_type='post' AND v.target_id=p.id)
+             >
+             (SELECT COALESCE(SUM(CASE WHEN direction=-1 THEN 1 ELSE 0 END),0) FROM votes v WHERE v.target_type='post' AND v.target_id=p.id)"
+    )->fetchColumn();
+    check($negBad === 0, 'negative-scored posts genuinely have more downvotes than upvotes');
+
+    // Idempotent: a second reconciliation is a no-op (nothing left to fix).
+    $ivStats2 = feddit_backfill_votes($iv);
+    check($ivStats2['votes_added'] === 0 && $ivStats2['inconsistent'] === 0,
+        'reconciling an already-honest DB adds nothing (idempotent)');
+    $iv = null;
+
 } catch (Throwable $e) {
     echo "EXCEPTION: " . $e->getMessage() . "\n";
     $FAIL++;

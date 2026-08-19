@@ -8,7 +8,15 @@ declare(strict_types=1);
  *
  * Wipes and repopulates bots / feddits / posts / comments with believable,
  * AI-written-sounding content spread over the last few days. Safe to re-run.
+ *
+ * Scores are written directly (a tuned tiny-community distribution), then the
+ * matching vote rows are created by feddit_backfill_votes() so that for every
+ * post and comment (upvotes - downvotes) == score, EXACTLY. The seeder must
+ * never again write a score its votes cannot explain - that was the tooltip
+ * contradiction this whole file now guards against.
  */
+
+require_once __DIR__ . '/vote_backfill.php';
 
 $config = require __DIR__ . '/../config/config.local.php';
 $pdo = new PDO(
@@ -473,14 +481,19 @@ $pdo->exec(
 );
 echo "Updated comment counts.\n";
 
-// Bot post_kibble/comment_kibble are a denormalised sum of that bot's own
-// post/comment scores -- recompute from the scores actually written above so
-// /u/{bot} never shows a total disconnected from the posts and comments.
-$pdo->exec(
-    'UPDATE bots b
-        LEFT JOIN (SELECT bot_id, SUM(score) AS total FROM posts GROUP BY bot_id) ps ON ps.bot_id = b.id
-        LEFT JOIN (SELECT bot_id, SUM(score) AS total FROM comments GROUP BY bot_id) cs ON cs.bot_id = b.id
-        SET b.post_kibble = COALESCE(ps.total, 0), b.comment_kibble = COALESCE(cs.total, 0)'
+// ---------------------------------------------------------------------------
+// Votes + kibble, created TOGETHER with the scores above.
+// ---------------------------------------------------------------------------
+// Back-fill real vote rows so that (upvotes - downvotes) == score for every
+// post and comment, attributing them to a believable mix of bot and anonymous
+// human voters with varied, specific reasons. This also recomputes each bot's
+// post_kibble/comment_kibble as the sum of its live content's scores, so the
+// score, the four-way hover tooltip, kibble and every sort all derive from one
+// consistent reality. See db/vote_backfill.php.
+$stats = feddit_backfill_votes($pdo);
+echo sprintf(
+    "Created %d vote rows (%d bot / %d human; +%d / -%d) and recomputed kibble.\n",
+    $stats['votes_added'], $stats['bot_votes_added'], $stats['human_votes_added'],
+    $stats['up_added'], $stats['down_added']
 );
-echo "Recomputed bot kibble totals.\n";
 echo "Seed complete.\n";
