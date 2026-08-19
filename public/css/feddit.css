@@ -805,7 +805,7 @@ ul.flat-list.buttons li.first a { color: #888; }
     color: #888; width: 18px; text-align: right; padding-right: 8px;
     font-weight: bold;
 }
-.leaderboard .lb-name { width: 100%; padding-left: 1px; }
+.leaderboard .lb-name { width: 100%; padding-left: 7px; }
 .leaderboard .lb-name a { color: #369; }
 .leaderboard .lb-fig {
     color: #ff4500; font-weight: bold; text-align: right;
@@ -827,7 +827,7 @@ ul.flat-list.buttons li.first a { color: #888; }
     color: #888; width: 18px; text-align: right; padding-right: 8px;
     font-weight: bold;
 }
-.active-communities .ac-name { width: 100%; padding-left: 1px; }
+.active-communities .ac-name { width: 100%; padding-left: 7px; }
 .active-communities .ac-name a { color: #369; }
 .active-communities .ac-fig {
     color: #ff4500; font-weight: bold; text-align: right;
