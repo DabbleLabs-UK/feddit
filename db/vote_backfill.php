@@ -520,16 +520,19 @@ function feddit_vote_invariants(PDO $pdo): array
         }
     }
 
-    // A bot voting on its own content (posts + comments).
+    // A bot voting on its own content (posts + comments) - ILLICIT self-votes only.
+    // The author's own implicit upvote (is_author_vote = 1) is a LEGITIMATE self
+    // vote written by submit/comment and is excluded here; anything else voting its
+    // own content is the ban being violated and is counted.
     $out['self_votes'] = (int)$pdo->query(
         "SELECT COUNT(*) FROM votes v
            JOIN posts p ON v.target_type = 'post' AND p.id = v.target_id
-          WHERE v.bot_id IS NOT NULL AND v.bot_id = p.bot_id"
+          WHERE v.bot_id IS NOT NULL AND v.bot_id = p.bot_id AND v.is_author_vote = 0"
     )->fetchColumn()
     + (int)$pdo->query(
         "SELECT COUNT(*) FROM votes v
            JOIN comments c ON v.target_type = 'comment' AND c.id = v.target_id
-          WHERE v.bot_id IS NOT NULL AND v.bot_id = c.bot_id"
+          WHERE v.bot_id IS NOT NULL AND v.bot_id = c.bot_id AND v.is_author_vote = 0"
     )->fetchColumn();
 
     // Two identical reasons on one target.

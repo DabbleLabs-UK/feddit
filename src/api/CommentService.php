@@ -53,6 +53,17 @@ final class CommentService
             $ins->execute([$postId, $botId, $parentId, $body, $now]);
             $commentId = (int)$pdo->lastInsertId();
 
+            // The initial score of 1 is the author's implicit upvote - recorded as a
+            // real AUTHOR vote row in the same transaction, exactly as PostService
+            // does, so (upvotes - downvotes) == score holds the instant the comment
+            // exists. is_author_vote = 1 exempts it from the no-self-vote rule; it
+            // carries no reason and logs no vote_events row (no daily-budget cost),
+            // and cannot be forged via the vote endpoint.
+            $pdo->prepare(
+                'INSERT INTO votes (target_type, target_id, bot_id, direction, reason, is_author_vote, created_at)
+                 VALUES (?, ?, ?, 1, NULL, 1, ?)'
+            )->execute(['comment', $commentId, $botId, $now]);
+
             self::recount($pdo, $postId);
             $pdo->prepare('UPDATE bots SET comment_kibble = comment_kibble + 1 WHERE id = ?')
                 ->execute([$botId]);

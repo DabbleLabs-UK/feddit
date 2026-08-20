@@ -65,7 +65,8 @@ $pdo->exec("CREATE TABLE comments (
     score INTEGER NOT NULL DEFAULT 1, is_deleted INTEGER NOT NULL DEFAULT 0, edited_at TEXT)");
 $pdo->exec("CREATE TABLE votes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, target_type TEXT NOT NULL, target_id INTEGER NOT NULL,
-    voter_fingerprint TEXT, bot_id INTEGER, direction INTEGER NOT NULL, reason TEXT, created_at TEXT NOT NULL,
+    voter_fingerprint TEXT, bot_id INTEGER, direction INTEGER NOT NULL, reason TEXT,
+    is_author_vote INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
     UNIQUE (target_type, target_id, voter_fingerprint),
     UNIQUE (target_type, target_id, bot_id),
     CHECK ((bot_id IS NULL) <> (voter_fingerprint IS NULL)))");
@@ -418,6 +419,99 @@ try {
     $hits = $r['json']['results']['data']['children'] ?? [];
     check($r['status'] === 200 && count($hits) >= 1, 'comment search (scoped to feddit) finds the comment');
 
+    echo "== author self-vote: submit -> invariant holds immediately (no back-fill) ==\n";
+    // THE regression guard for the phantom-+1 bug: a fresh post used to be written
+    // with score = 1 and NO matching vote row, so (upvotes - downvotes) != score the
+    // instant it existed. Now submit records the author's implicit upvote as a real
+    // AUTHOR vote row in the same transaction. Prove it end-to-end over the SAME
+    // SQLite file the server writes, with NO reconciliation step in between.
+    require_once $ROOT . '/db/vote_backfill.php';
+    require_once $ROOT . '/src/api/VoteService.php';
+
+    $tokenSV = http('POST', '/api/v1/register', ['json' => ['username' => 'selfvote_bot']])['json']['token'] ?? null;
+    check(is_string($tokenSV), 'register selfvote_bot');
+    $graduate('selfvote_bot');
+    http('POST', '/api/v1/feddits', ['bearer' => $tokenSV, 'json' => ['name' => 'selftest', 'title' => 'Self Test', 'sidebar_text' => 'invariant']]);
+
+    $sv = http('POST', '/api/v1/submit', ['bearer' => $tokenSV, 'json' => [
+        'feddit' => 'selftest', 'title' => 'A post that must reconcile the instant it exists', 'kind' => 'text', 'body' => 'x',
+    ]]);
+    $svPost = (int)($sv['json']['post']['data']['id'] ?? 0);
+    check($svPost > 0 && (int)($sv['json']['post']['data']['score'] ?? -999) === 1, 'fresh post is created with score 1');
+
+    // Open the same DB the running server just wrote to.
+    $db = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $db->exec('PRAGMA foreign_keys = ON');
+    $svBot = (int)$db->query("SELECT bot_id FROM posts WHERE id = {$svPost}")->fetchColumn();
+
+    // Exactly ONE vote row on the fresh post, and it is a well-formed author vote.
+    $av = $db->query("SELECT bot_id, voter_fingerprint, direction, reason, is_author_vote FROM votes WHERE target_type='post' AND target_id={$svPost}")->fetchAll(PDO::FETCH_ASSOC);
+    check(count($av) === 1, 'the fresh post has exactly one vote row (the author self-vote)');
+    $a = $av[0] ?? [];
+    check((int)($a['bot_id'] ?? 0) === $svBot, 'author self-vote is attributed to the author bot');
+    check($a['voter_fingerprint'] === null && (int)($a['direction'] ?? 0) === 1
+        && $a['reason'] === null && (int)($a['is_author_vote'] ?? 0) === 1,
+        'author self-vote: bot_id set, direction +1, NO reason, is_author_vote = 1');
+
+    // The four-way hover tally reconciles to the displayed score, through the real
+    // tally code path (VoteService::tallyFor).
+    $t = VoteService::tallyFor($db, 'post', $svPost);
+    check($t['bot_up'] === 1 && $t['bot_down'] === 0 && $t['human_up'] === 0 && $t['human_down'] === 0,
+        'tooltip tally shows exactly the author upvote (bot_up=1)');
+    check(($t['bot_up'] + $t['human_up']) - ($t['bot_down'] + $t['human_down']) === 1,
+        'the four tally numbers net to the displayed score (1)');
+
+    // A comment shares the bug and the fix: it too gets a real author self-vote.
+    $svc = http('POST', '/api/v1/comment', ['bearer' => $tokenSV, 'json' => ['post_id' => $svPost, 'body' => 'A comment that must also reconcile immediately.']]);
+    $svComment = (int)($svc['json']['comment']['data']['id'] ?? 0);
+    check($svComment > 0 && (int)($svc['json']['comment']['data']['score'] ?? -999) === 1, 'fresh comment is created with score 1');
+    $cav = $db->query("SELECT is_author_vote, reason, direction FROM votes WHERE target_type='comment' AND target_id={$svComment}")->fetchAll(PDO::FETCH_ASSOC);
+    check(count($cav) === 1 && (int)($cav[0]['is_author_vote'] ?? 0) === 1 && $cav[0]['reason'] === null && (int)($cav[0]['direction'] ?? 0) === 1,
+        'the fresh comment has exactly one author self-vote (direction +1, no reason)');
+
+    // THE assertion that would have caught the bug: with NO back-fill, the whole
+    // site already satisfies every invariant, because every post/comment so far was
+    // created through the normal API path and carries its own honest author vote.
+    $ivFresh = feddit_vote_invariants($db);
+    check(count($ivFresh['bad_score']) === 0,
+        'INVARIANT (no back-fill): every live post/comment has (upvotes - downvotes) == score' .
+        (count($ivFresh['bad_score']) ? ' (violations: ' . implode('; ', array_slice($ivFresh['bad_score'], 0, 5)) . ')' : ''));
+    check(count($ivFresh['bad_kibble']) === 0, 'INVARIANT (no back-fill): every bot kibble == sum of its live content scores');
+    check($ivFresh['self_votes'] === 0, 'the author self-vote is NOT counted as an illicit self-vote');
+    check(count($ivFresh['dup_reason']) === 0, 'author self-votes carry no reason, so they add no duplicate reasons');
+
+    // Every author self-vote is well-formed, and there is EXACTLY one per live
+    // post/comment - never more (no double-count) and never zero (no phantom +1).
+    $authorRows = (int)$db->query("SELECT COUNT(*) FROM votes WHERE is_author_vote = 1")->fetchColumn();
+    $liveContent = (int)$db->query("SELECT (SELECT COUNT(*) FROM posts WHERE is_deleted=0) + (SELECT COUNT(*) FROM comments WHERE is_deleted=0)")->fetchColumn();
+    check($authorRows === $liveContent, 'exactly one author self-vote per live post/comment (no phantom, no double-count)');
+    $malformed = (int)$db->query("SELECT COUNT(*) FROM votes WHERE is_author_vote = 1 AND (reason IS NOT NULL OR voter_fingerprint IS NOT NULL OR direction <> 1 OR bot_id IS NULL)")->fetchColumn();
+    check($malformed === 0, 'no author self-vote is malformed (all are bot_id, +1, no reason, no fingerprint)');
+
+    // A bot CANNOT manufacture a self-vote through the API to farm kibble: voting on
+    // its own content is refused before any row is written, so the count of author
+    // rows on the post is unchanged and no is_author_vote row was forged.
+    $forge = http('POST', '/api/v1/vote', ['bearer' => $tokenSV, 'json' => ['target_type' => 'post', 'target_id' => $svPost, 'direction' => 1, 'reason' => 'Trying to upvote my own post to mint an author vote.']]);
+    check($forge['status'] === 403, 'a bot voting its own content is refused (cannot forge an author vote) -> 403');
+    $stillOne = (int)$db->query("SELECT COUNT(*) FROM votes WHERE target_type='post' AND target_id={$svPost}")->fetchColumn();
+    check($stillOne === 1, 'the refused self-vote wrote nothing: the post still has just its one author vote');
+
+    // A DIFFERENT bot voting the post creates an ORDINARY vote (is_author_vote = 0):
+    // the flag is set ONLY by submit/comment, never by the vote endpoint.
+    $tokenSV2 = http('POST', '/api/v1/register', ['json' => ['username' => 'selfvote_peer']])['json']['token'] ?? null;
+    $graduate('selfvote_peer');
+    $peer = http('POST', '/api/v1/vote', ['bearer' => $tokenSV2, 'json' => ['target_type' => 'post', 'target_id' => $svPost, 'direction' => 1, 'reason' => 'A genuine reasoned upvote from a different bot entirely.']]);
+    check($peer['status'] === 200, "a different bot's reasoned upvote on the post -> 200");
+    $peerAuthorFlag = (int)$db->query("SELECT COALESCE(MAX(is_author_vote),0) FROM votes WHERE target_type='post' AND target_id={$svPost} AND bot_id={$svBot}")->fetchColumn();
+    $peerRowFlag = (int)$db->query("SELECT is_author_vote FROM votes WHERE target_type='post' AND target_id={$svPost} AND bot_id <> {$svBot} AND bot_id IS NOT NULL LIMIT 1")->fetchColumn();
+    check($peerAuthorFlag === 1 && $peerRowFlag === 0, 'endpoint votes are is_author_vote = 0; only the author row is flagged');
+
+    // The author self-vote does NOT count against the bot's daily vote budget: it is
+    // written by submit/comment, not the vote endpoint, so it logs no vote_events row.
+    $svEvents = (int)$db->query("SELECT COUNT(*) FROM vote_events WHERE bot_id = {$svBot}")->fetchColumn();
+    check($svEvents === 0, 'submitting a post + comment logged no vote_events (author self-votes are free of the daily cap)');
+    $db = null;
+
     echo "== sorts (hot / new / rising / top over the JSON API) ==\n";
     // Build a controlled scenario in its own feddit. Posts submitted via the API are
     // all "now" with score 1, so we set created_at/score directly in the SQLite DB to
@@ -712,6 +806,11 @@ try {
     $bsl  = http('GET', "/api/v1/comments/{$votePost}.json");
     $vs0  = (int)($bsl['json']['post']['data']['score'] ?? 0);
     $apk0 = (int)(http('GET', '/api/v1/u/alpha_bot.json')['json']['bot']['post_kibble'] ?? 0);
+    // $votePost is authored by alpha_bot, so it already carries alpha's own implicit
+    // upvote as a real AUTHOR vote row (bot_up = 1) - reddit's "+1 from the author".
+    // That is why the bot-upvote tallies below read one HIGHER than the number of
+    // votes voter_bot casts: the author's self-vote counts in bot_up too, which is
+    // exactly what keeps the four tooltip numbers netting to the displayed score.
 
     // Reason is required.
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 1]]);
@@ -734,13 +833,13 @@ try {
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 1, 'reason' => $goodReason]]);
     check($r['status'] === 200, 'reasoned bot upvote -> 200');
     check((int)($r['json']['score'] ?? -999) === $vs0 + 1, 'bot upvote raises score by 1');
-    check((int)($r['json']['tally']['bot_up'] ?? -1) === 1, 'response tally shows one bot upvote');
+    check((int)($r['json']['tally']['bot_up'] ?? -1) === 2, 'response tally shows the bot upvote + the author self-vote (bot_up=2)');
     check(($r['json']['reason'] ?? '') !== '', 'reason echoed back');
 
     // Idempotent: same direction again is a no-op.
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 1, 'reason' => $goodReason]]);
     check((int)($r['json']['score'] ?? -999) === $vs0 + 1, 'repeat bot upvote is idempotent (no double count)');
-    check((int)($r['json']['tally']['bot_up'] ?? -1) === 1, 'tally still one bot upvote after repeat');
+    check((int)($r['json']['tally']['bot_up'] ?? -1) === 2, 'tally still bot_up=2 after repeat (author self-vote + voter)');
 
     // The author's kibble tracked the bot vote, same as a human vote.
     check((int)(http('GET', '/api/v1/u/alpha_bot.json')['json']['bot']['post_kibble'] ?? -999) === $apk0 + 1, 'author post_kibble +1 after bot upvote');
@@ -748,12 +847,13 @@ try {
     // A human also upvotes the same post: the four-way tally counts them separately.
     $r = http('POST', '/api/v1/vote', ['headers' => ['X-Feddit-Vote: 1'], 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 1]]);
     check($r['status'] === 200, 'human upvote on the same post -> 200');
-    check((int)($r['json']['tally']['bot_up'] ?? -1) === 1 && (int)($r['json']['tally']['human_up'] ?? -1) === 1,
-        'tally splits bot vs human upvotes (bot_up=1, human_up=1)');
+    check((int)($r['json']['tally']['bot_up'] ?? -1) === 2 && (int)($r['json']['tally']['human_up'] ?? -1) === 1,
+        'tally splits bot vs human upvotes (bot_up=2 incl. author self-vote, human_up=1)');
 
-    // Flip the bot vote to a downvote: moves in the tally, reason refreshed.
+    // Flip the bot vote to a downvote: voter_bot moves up->down, but the author's
+    // own self-vote stays an upvote - so bot_up drops to 1 (the author), not 0.
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => -1, 'reason' => 'On reflection the core claim is unsupported by the method.']]);
-    check((int)($r['json']['tally']['bot_up'] ?? -1) === 0 && (int)($r['json']['tally']['bot_down'] ?? -1) === 1, 'flip moves the bot vote up->down in the tally');
+    check((int)($r['json']['tally']['bot_up'] ?? -1) === 1 && (int)($r['json']['tally']['bot_down'] ?? -1) === 1, 'flip moves voter_bot up->down; the author self-vote remains bot_up=1');
 
     // Remove the bot vote (direction 0 needs no reason).
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 0]]);
@@ -764,7 +864,7 @@ try {
     // A bot vote on a comment moves comment_kibble.
     $ck0 = (int)(http('GET', '/api/v1/u/alpha_bot.json')['json']['bot']['comment_kibble'] ?? 0);
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'comment', 'target_id' => $commentId, 'direction' => 1, 'reason' => 'This clarification is the genuinely useful part of the thread.']]);
-    check($r['status'] === 200 && (int)($r['json']['tally']['bot_up'] ?? -1) === 1, 'bot upvote on a comment -> 200, tallied');
+    check($r['status'] === 200 && (int)($r['json']['tally']['bot_up'] ?? -1) === 2, 'bot upvote on a comment -> 200, tallied (bot_up=2 incl. the comment author self-vote)');
     check((int)(http('GET', '/api/v1/u/alpha_bot.json')['json']['bot']['comment_kibble'] ?? -999) === $ck0 + 1, 'author comment_kibble +1 after bot comment upvote');
 
     echo "== bot vote rate limit ==\n";

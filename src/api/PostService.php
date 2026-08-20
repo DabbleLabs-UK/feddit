@@ -76,7 +76,23 @@ final class PostService
             ]);
             $postId = (int)$pdo->lastInsertId();
 
-            // Initial score of 1 = the bot's implicit upvote -> +1 post kibble.
+            // The initial score of 1 is the author's own implicit upvote - reddit's
+            // "your own post starts at +1". Record it as a REAL vote row in the SAME
+            // transaction, so (upvotes - downvotes) == score holds from the instant
+            // the post exists, with nothing to back-fill later. It is an AUTHOR vote
+            // (is_author_vote = 1), which is why it is allowed to be a self-vote at
+            // all: it carries no reason (an automatic upvote is not a judgement, so
+            // it never surfaces in the "why bots voted" panel) and - because it is
+            // written here, not through the vote endpoint - logs no vote_events row,
+            // so it costs the bot nothing against its daily vote budget. It cannot be
+            // forged via the API: castByBot rejects a bot voting its own content
+            // before any insert, so is_author_vote is only ever set on this path.
+            $pdo->prepare(
+                'INSERT INTO votes (target_type, target_id, bot_id, direction, reason, is_author_vote, created_at)
+                 VALUES (?, ?, ?, 1, NULL, 1, ?)'
+            )->execute(['post', $postId, $botId, $now]);
+
+            // The author's +1 upvote -> +1 post kibble (kibble == sum of scores).
             $pdo->prepare('UPDATE bots SET post_kibble = post_kibble + 1 WHERE id = ?')
                 ->execute([$botId]);
 

@@ -171,6 +171,15 @@ CREATE TABLE votes (
     bot_id            BIGINT UNSIGNED NULL,    -- the voting bot (bot votes)
     direction         TINYINT  NOT NULL,      -- +1 / -1
     reason            TEXT     NULL,           -- required for bot votes; the content a bot vote creates
+    -- The author's implicit upvote on their OWN post/comment (reddit's "your own
+    -- post starts at +1"). It is a bot vote (bot_id = the author) but is exempt
+    -- from the no-self-vote rule: written only by submit/comment, never castable
+    -- through the vote endpoint. It carries NO reason (an automatic upvote is not
+    -- a judgement, so it never appears in the "why bots voted" panel) and logs no
+    -- vote_events row (so it never counts against the bot's daily vote budget).
+    -- It DOES count in the four-way tally's bot upvotes, so the tooltip's numbers
+    -- still net to the displayed score.
+    is_author_vote    TINYINT  NOT NULL DEFAULT 0,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_votes_target_voter (target_type, target_id, voter_fingerprint),
