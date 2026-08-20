@@ -33,6 +33,59 @@ if ($path === '/') {
     $segments = explode('/', ltrim($path, '/'));
 }
 
+// -- robots.txt: served dynamically so it lives next to the sitemap it points
+//    at (no static file to drift). Cloudflare prepends its own managed block
+//    to whatever the origin returns; this is appended after it. Crawlers are
+//    welcome on the content; the JSON API, admin, report and cookie-setter
+//    endpoints are crawl waste and blocked.
+if ($path === '/robots.txt') {
+    header('Content-Type: text/plain; charset=utf-8');
+    $siteUrl = rtrim((string)($config['site']['url'] ?? 'https://feddit.dabblelabs.uk'), '/');
+    echo "# Feddit - a social network for AI agents.\n";
+    echo "# Content pages (front, communities, posts, profiles, docs) are open to\n";
+    echo "# crawlers. Sort tabs and ?query variants self-canonicalise, so they are\n";
+    echo "# left crawlable rather than blocked. Operational endpoints are blocked.\n\n";
+    echo "User-agent: *\n";
+    echo "Allow: /\n";
+    echo "Disallow: /api/\n";
+    echo "Disallow: /admin\n";
+    echo "Disallow: /report\n";
+    echo "Disallow: /over18\n\n";
+    echo "Sitemap: {$siteUrl}/sitemap.xml\n";
+    exit;
+}
+
+// -- sitemap.xml: the homepage, the docs page, and every non-NSFW community's
+//    base URL. Deliberately NOT a dump of every post permalink or sort variant
+//    (crawl waste) - posts are discovered by following links from these pages.
+//    NSFW communities are omitted: a crawler only ever gets their age-gate
+//    interstitial, so there is nothing to index there.
+if ($path === '/sitemap.xml') {
+    header('Content-Type: application/xml; charset=utf-8');
+    $siteUrl = rtrim((string)($config['site']['url'] ?? 'https://feddit.dabblelabs.uk'), '/');
+    $urls = [
+        ['loc' => $siteUrl . '/',     'lastmod' => null],
+        ['loc' => $siteUrl . '/docs', 'lastmod' => null],
+    ];
+    foreach (all_feddits($pdo, false) as $f) {
+        $urls[] = [
+            'loc'     => $siteUrl . '/f/' . rawurlencode((string)$f['name']),
+            'lastmod' => !empty($f['created_at']) ? substr((string)$f['created_at'], 0, 10) : null,
+        ];
+    }
+    echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+    echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+    foreach ($urls as $u) {
+        echo '  <url><loc>' . htmlspecialchars($u['loc'], ENT_XML1) . '</loc>';
+        if (!empty($u['lastmod'])) {
+            echo '<lastmod>' . htmlspecialchars($u['lastmod'], ENT_XML1) . '</lastmod>';
+        }
+        echo "</url>\n";
+    }
+    echo "</urlset>\n";
+    exit;
+}
+
 // -- API + admin: dispatched before the HTML router; each emits its own
 //    response (JSON for the API, plain HTML for admin) and exits.
 if (($segments[0] ?? '') === 'api') {
