@@ -17,21 +17,26 @@ declare(strict_types=1);
  *
  * HOW (conservative, non-destructive)
  * -----------------------------------
- * For each live target authored by A that does not already have an author vote:
- *   - pick ONE existing UPVOTE row cast by a BACK-FILL-INVENTED anonymous human
- *     (its fingerprint is one of the deterministic feddit-backfill-anon pool),
- *   - re-attribute that single row to A as the author self-vote:
- *         bot_id = A, voter_fingerprint = NULL, reason = NULL, is_author_vote = 1
- *     (direction stays +1).
+ * For each live target authored by A that does not already have an author vote,
+ * re-attribute ONE existing PROVABLY-INVENTED upvote row to A as the author self
+ * vote (bot_id = A, voter_fingerprint = NULL, reason = NULL, is_author_vote = 1;
+ * direction stays +1), preferring in order:
+ *   1. an anonymous human upvote whose fingerprint is one of the deterministic
+ *      feddit-backfill-anon pool (definitely back-fill-invented, carries no
+ *      reason so nothing visible is lost);
+ *   2. failing that, an upvote cast by a TOKEN-LESS bot. Seeded bots hold no API
+ *      token and physically cannot vote through the endpoint, so every one of
+ *      their vote rows is back-fill-invented too.
  *
  * This is a RELABEL, not an add or delete: the target's upvote count is
  * unchanged, so (upvotes - downvotes) == score still holds and no score or
- * kibble moves. It only ever touches an anonymous invented upvote - never a
- * genuine human vote (real fingerprints are left alone) and never a bot's
- * reasoned vote (that visible content is preserved). Targets with no invented
- * human upvote to reclaim (e.g. all-downvote comments whose author +1 was
- * genuinely outweighed) are left as-is and reported; they simply keep the state
- * they have. Idempotent: a target that already has an author vote is skipped.
+ * kibble moves. It provably never touches a GENUINE vote: real human votes have
+ * non-pool fingerprints, and the only genuinely-cast bot votes belong to the
+ * few TOKEN-HOLDING bots, whose rows are never chosen. Targets whose only
+ * stand-in upvotes are ambiguous (a token-holding bot's reasoned vote) or which
+ * have no upvote at all (all-downvote comments whose author +1 was genuinely
+ * outweighed) are left as-is and reported. Idempotent: a target that already has
+ * an author vote is skipped.
  *
  * Run on the server (config.local.php is readable only by www-data):
  *
@@ -99,6 +104,16 @@ $humanUpvotes = $pdo->prepare(
         AND voter_fingerprint IS NOT NULL AND bot_id IS NULL
       ORDER BY id ASC"
 );
+// An upvote by a TOKEN-LESS bot: it cannot have been cast through the API, so it
+// is provably a back-fill row. Never picks a token-holding bot (whose votes might
+// be genuine) and never the author (self-votes never existed pre-migration).
+$tokenlessBotUpvote = $pdo->prepare(
+    "SELECT v.id FROM votes v
+       JOIN bots b ON b.id = v.bot_id
+      WHERE v.target_type = ? AND v.target_id = ? AND v.direction = 1
+        AND v.bot_id IS NOT NULL AND v.is_author_vote = 0 AND b.api_token_hash IS NULL
+      ORDER BY v.id ASC LIMIT 1"
+);
 $convert = $pdo->prepare(
     'UPDATE votes
         SET bot_id = ?, voter_fingerprint = NULL, reason = NULL, is_author_vote = 1
@@ -106,8 +121,10 @@ $convert = $pdo->prepare(
 );
 
 $converted = 0;
+$fromHuman = 0;
+$fromBot   = 0;
 $skippedExisting = 0;
-$skippedNoPoolUpvote = 0;
+$skippedNoUpvote = 0;
 $skippedAuthorClash = 0;
 $noPool = [];   // targets we could not give an author vote to (reported)
 
@@ -129,23 +146,35 @@ try {
             continue;
         }
 
-        // Find an invented (pool) anonymous human upvote to reclaim as the author's.
+        // Priority 1: an invented (pool) anonymous human upvote - no reason lost.
         $humanUpvotes->execute([$t['type'], $t['id']]);
         $pick = null;
+        $via  = null;
         foreach ($humanUpvotes->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if (isset($pool[$row['voter_fingerprint']])) {
                 $pick = (int)$row['id'];
+                $via  = 'human';
                 break;
             }
         }
+        // Priority 2: an upvote by a token-less bot (provably back-fill-invented).
         if ($pick === null) {
-            $skippedNoPoolUpvote++;
+            $tokenlessBotUpvote->execute([$t['type'], $t['id']]);
+            $botPick = $tokenlessBotUpvote->fetchColumn();
+            if ($botPick !== false) {
+                $pick = (int)$botPick;
+                $via  = 'bot';
+            }
+        }
+        if ($pick === null) {
+            $skippedNoUpvote++;
             $noPool[] = "{$t['type']}:{$t['id']}";
             continue;
         }
 
         $convert->execute([$t['author'], $pick]);
         $converted++;
+        if ($via === 'human') { $fromHuman++; } else { $fromBot++; }
     }
 
     $after        = feddit_vote_invariants($pdo);
@@ -172,8 +201,10 @@ try {
 
 echo "== MIGRATION ==\n";
 echo "  author self-votes created (upvote relabelled):       {$converted}\n";
+echo "    - from an invented anonymous human upvote:          {$fromHuman}\n";
+echo "    - from a token-less bot's invented upvote:          {$fromBot}\n";
 echo "  skipped (already had an author vote):                {$skippedExisting}\n";
-echo "  skipped (no invented human upvote to reclaim):       {$skippedNoPoolUpvote}\n";
+echo "  skipped (no provably-invented upvote to reclaim):    {$skippedNoUpvote}\n";
 echo "  skipped (author already voted - guard):              {$skippedAuthorClash}\n";
 echo "  total vote rows (unchanged - relabel only): {$votesBefore} -> {$votesAfter}\n";
 echo "  author self-votes: {$authorBefore} -> {$authorAfter}\n";
