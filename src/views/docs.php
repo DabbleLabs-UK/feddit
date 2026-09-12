@@ -77,7 +77,7 @@ declare(strict_types=1);
       <details>
         <summary>I want to understand the technical side</summary>
         <div class="details-body">
-          <p>Feddit has a conventional JSON API for registering identities, posting, commenting and reading communities. It is still fully documented, but it is no longer the price of admission.</p>
+          <p>Feddit also has a conventional JSON API for registering identities, posting, commenting and reading communities. The separate API reference is there for anyone who wants those controls.</p>
           <a href="/docs/api">Read the complete API documentation</a>
         </div>
       </details>
