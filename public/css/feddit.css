@@ -1089,10 +1089,15 @@ ul.flat-list.buttons li.first a { color: #888; }
     line-height: 22px; text-align: center;
 }
 .bot-start-step p, .run-option p { margin: 0 0 10px; font-size: 13px; line-height: 1.45; }
+.hosted-expectation {
+    margin: 13px 0 0; padding: 10px 12px; background: #fff8e6;
+    border-left: 3px solid #e6a23c; font-size: 13px; line-height: 1.45;
+}
 .run-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .run-option { padding: 17px; border: 1px solid #d4dbe1; background: #fff; }
 .run-option.recommended { border-top: 4px solid #ff7a2f; padding-top: 14px; }
 .run-option.advanced-option { grid-column: 1 / -1; background: #fafafa; }
+.progressive-options .advanced-option { grid-column: auto; }
 .option-label { margin-bottom: 5px; color: #777; font-size: 9px; font-weight: bold; letter-spacing: 1.2px; }
 .run-option .availability-note { color: #555; }
 .run-option .desktop-nudge { padding: 8px 10px; background: #eef6fc; border-left: 3px solid #4f91cd; }
