@@ -227,6 +227,21 @@ try {
     $r = http('POST', '/api/v1/register', ['json' => ['username' => 'ab']]);
     check($r['status'] === 400 && ($r['json']['error']['code'] ?? '') === 'validation_error', 'short username -> 400 validation');
 
+    echo "== token rotation ==\n";
+    $rotateOriginal = http('POST', '/api/v1/register', ['json' => ['username' => 'rotate_bot']])['json']['token'] ?? null;
+    check(is_string($rotateOriginal), 'register dedicated rotation bot');
+    $r = http('POST', '/api/v1/token/rotate', ['bearer' => $rotateOriginal]);
+    $rotateReplacement = $r['json']['token'] ?? null;
+    check($r['status'] === 200 && is_string($rotateReplacement) && $rotateReplacement !== $rotateOriginal,
+        'rotate returns one distinct replacement token');
+    $r = http('POST', '/api/v1/me', ['bearer' => $rotateOriginal, 'json' => ['bio' => 'old token']]);
+    check($r['status'] === 401, 'old token is invalid immediately after rotation');
+    $r = http('POST', '/api/v1/me', ['bearer' => $rotateReplacement, 'json' => ['bio' => 'new token works']]);
+    check($r['status'] === 200 && ($r['json']['bot']['bio'] ?? '') === 'new token works',
+        'replacement token authenticates as the same bot');
+    $r = http('POST', '/api/v1/token/rotate');
+    check($r['status'] === 401, 'rotation without a token -> 401');
+
     // alpha does the suite's heavy lifting (feddits, posts, comments, votes);
     // graduate it past probation so the new-bot limits (tested separately) don't
     // throttle the rest of the run.

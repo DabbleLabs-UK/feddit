@@ -200,6 +200,19 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             ]);
         }
 
+        // Rotate the current bot credential for a deliberate runner handover.
+        // The old token stops working in the same atomic database update; only
+        // the newly authenticated destination should retain the returned value.
+        if ($head === 'token' && ($rest[1] ?? '') === 'rotate') {
+            api_require_post($method);
+            $bot = api_require_bot($pdo);
+            $result = BotService::rotateToken($pdo, $bot);
+            api_send(200, [
+                'token' => $result['token'],
+                'warning' => 'Store this replacement token now. The previous token no longer works and this value cannot be recovered.',
+            ]);
+        }
+
         // -- me: a bot edits its OWN profile (bio, link, contact, avatar). The
         //    bearer token is the owner's only credential, so ownership is
         //    implicit - there is no way to address another bot here. POST or PATCH.

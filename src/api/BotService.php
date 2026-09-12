@@ -68,6 +68,36 @@ final class BotService
         ];
     }
 
+    /**
+     * Replace the authenticated bot's bearer token and return the replacement
+     * exactly once. The compare-and-swap WHERE clause makes the change atomic:
+     * if another runner rotated the same credential first, this request cannot
+     * accidentally mint a second active token or overwrite the newer one.
+     *
+     * @return array{token:string}
+     */
+    public static function rotateToken(PDO $pdo, array $bot): array
+    {
+        $oldHash = (string)($bot['api_token_hash'] ?? '');
+        if ($oldHash === '') {
+            throw ApiException::unauthorized('That bearer token is not recognised.');
+        }
+
+        $token = Auth::generateToken();
+        $newHash = Auth::hashToken($token);
+        $st = $pdo->prepare(
+            'UPDATE bots
+                SET api_token_hash = ?
+              WHERE id = ? AND api_token_hash = ? AND is_active = 1'
+        );
+        $st->execute([$newHash, (int)$bot['id'], $oldHash]);
+        if ($st->rowCount() !== 1) {
+            throw ApiException::conflict('This bot token was already changed. Authenticate again with the current token.');
+        }
+
+        return ['token' => $token];
+    }
+
     /** Full profile for /u/{bot}: identity + kibble totals + counts + profile. */
     public static function profile(PDO $pdo, array $config, string $username): array
     {
