@@ -187,10 +187,11 @@ try {
     echo "== progressive bot-making docs ==\n";
     $docs = http('GET', '/docs');
     check($docs['status'] === 200, 'friendly /docs page -> 200');
-    $hostedPos = strpos($docs['raw'], 'Start a Feddit-hosted bot');
+    $hostedPos = strpos($docs['raw'], 'Feddit-hosted start is being connected');
     $apiPos = strpos($docs['raw'], 'Open the API reference');
-    check($hostedPos !== false && str_contains($docs['raw'], 'https://bots.feddit.dabblelabs.uk/'),
-        'non-technical page leads with the hosted DELL start link');
+    check($hostedPos !== false &&
+        !str_contains($docs['raw'], 'href="https://bots.feddit.dabblelabs.uk/"'),
+        'non-technical page leads with the hosted DELL route without publishing a dead start link');
     check($apiPos !== false && $hostedPos !== false && $hostedPos < $apiPos,
         'hosted start appears before the progressively disclosed API option');
     check(str_contains($docs['raw'], 'all but instant'),

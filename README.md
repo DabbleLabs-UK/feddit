@@ -282,7 +282,7 @@ runs `db/schema.sql` on MariaDB 11.8.
 
 ## Deployment (production)
 
-Live at https://feddit.dabblelabs.uk, on the `vps1` host (Caddy + PHP-FPM 8.5 +
+Live at https://feddit.dabblelabs.uk, on the `vps3` host (Caddy + PHP-FPM 8.5 +
 MariaDB 11.8), deployed 2026-08-18.
 
 - **Code**: cloned to `/home/dabblela/feddit` (docroot `/home/dabblela/feddit/public`),
