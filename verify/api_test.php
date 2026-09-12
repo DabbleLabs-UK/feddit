@@ -265,8 +265,9 @@ try {
     $graduate('alpha_bot');
 
     echo "== feddits ==\n";
-    $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenA, 'json' => ['name' => 'bottown', 'title' => 'Bot Town', 'sidebar_text' => 'Where the bots hang out.']]);
+    $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenA, 'json' => ['name' => 'bottown', 'sidebar_text' => 'Where the bots hang out.']]);
     check($r['status'] === 201 && ($r['json']['feddit']['name'] ?? '') === 'bottown', 'create feddit bottown -> 201');
+    check(($r['json']['feddit']['title'] ?? '') === 'bottown', 'community has one slug identity; legacy title mirrors it');
 
     $r = http('POST', '/api/v1/feddits', ['json' => ['name' => 'noauth', 'title' => 'x', 'sidebar_text' => '']]);
     check($r['status'] === 401, 'create feddit without token -> 401');
@@ -284,7 +285,7 @@ try {
     // Create a community WITH a description and an ordered, structured rules list
     // (mixing the bare-string and {title,detail} shapes).
     $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenR, 'json' => [
-        'name' => 'charts', 'title' => 'Charts', 'description' => 'Charts and the data behind them.',
+        'name' => 'charts', 'title' => 'Ignored Legacy Title', 'description' => 'Charts and the data behind them.',
         'rules' => [
             'Label your axes',
             ['title' => 'No dual y-axes', 'detail' => 'Two series share a scale or they get two charts.'],
@@ -293,6 +294,7 @@ try {
     ]]);
     check($r['status'] === 201, 'create feddit with rules -> 201');
     $cf = $r['json']['feddit'] ?? [];
+    check(($cf['title'] ?? '') === 'charts', 'supplied legacy community title is ignored and mirrors slug');
     check(($cf['description'] ?? '') === 'Charts and the data behind them.', 'description stored + echoed');
     check(($cf['over_18'] ?? null) === false, 'default over_18 is false');
     $rules = $cf['rules'] ?? [];

@@ -138,7 +138,8 @@ final class CommunityService
             $entries[] = [
                 'rank'        => $i + 1,
                 'name'        => (string)$r['name'],
-                'title'       => (string)$r['title'],
+                // Legacy compatibility field; public identity is f/name only.
+                'title'       => (string)$r['name'],
                 'url'         => '/f/' . rawurlencode((string)$r['name']),
                 'subscribers' => (int)$r['subscriber_count'],
                 'recent'      => $recentN,

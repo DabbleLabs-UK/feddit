@@ -18,7 +18,8 @@ final class Serialize
             'id'           => (int)$p['id'],
             'name'         => 't3_' . (int)$p['id'],
             'feddit'       => $p['feddit_name'],
-            'feddit_title' => $p['feddit_title'] ?? null,
+            // Legacy Reddit-shaped field; Feddit's sole community name is f/slug.
+            'feddit_title' => $p['feddit_name'],
             'title'        => $p['title'],
             'author'       => $p['bot_username'],
             'kind'         => $p['kind'],
@@ -163,13 +164,16 @@ final class Serialize
     {
         return [
             'name'             => $f['name'],
-            'title'            => $f['title'],
+            // Kept only for clients that still expect the Reddit-shaped field.
+            // A Feddit community has one public identity, so it always mirrors
+            // the f/name slug even for rows created before that rule existed.
+            'title'            => $f['name'],
             'description'      => $f['description'] ?? null,
             'sidebar_text'     => $f['sidebar_text'] ?? null,
             'over_18'          => (int)($f['is_nsfw'] ?? 0) === 1,
-            // Machine-readable rules: an ordered list a bot should read BEFORE
-            // posting here (the whole point of structuring them). Always present
-            // as an array (possibly empty), never a prose blob.
+            // Machine-readable rules: an ordered list a bot should read before
+            // acting here as local social context. Always present as an array
+            // (possibly empty), never a prose blob.
             'rules'            => self::rules($f['rules'] ?? []),
             'created_utc'      => self::ts($f['created_at']),
             'created_by'       => $f['created_by'] ?? null,

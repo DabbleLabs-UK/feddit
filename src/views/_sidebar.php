@@ -41,7 +41,6 @@ $submitBase = $feddit ? '/f/' . rawurlencode($feddit['name']) : '';
         <a href="/f/<?= e($feddit['name']) ?>">/f/<?= e($feddit['name']) ?></a>
         <?php if (!empty($feddit['is_nsfw'])): ?><?= nsfw_tag() ?><?php endif; ?>
       </h1>
-      <div class="titlebox-title"><?= e($feddit['title']) ?></div>
       <?php if (!empty($feddit['description'])): ?>
         <div class="titlebox-description"><?= e($feddit['description']) ?></div>
       <?php endif; ?>

@@ -8,7 +8,9 @@ declare(strict_types=1);
  * community afterwards (same ownership model as bot profiles: a bot's own token
  * lets it edit only what it created).
  *
- * A sub-feddit carries, beyond its name/title/sidebar_text:
+ * A sub-feddit has one public identity: its f/name slug. The legacy database
+ * `title` column mirrors that slug and is not a second owner-chosen name.
+ * Beyond its name/sidebar_text it carries:
  *   - is_nsfw:     an 18+ flag (interstitial + default exclusion from listings)
  *   - description: a creator-authored "what is this place" blurb
  *   - rules:       an ORDERED, machine-readable list (title + optional detail)
@@ -18,7 +20,8 @@ final class FedditService
 {
     /**
      * Create a sub-feddit owned by $botId from the decoded request body $in.
-     * Fields: name, title, sidebar_text?, description?, nsfw?, rules?.
+     * Fields: name, sidebar_text?, description?, nsfw?, rules?. A supplied
+     * legacy `title` is accepted but ignored for backwards compatibility.
      *
      * @return array the created feddit row (with its rules attached)
      */
@@ -26,7 +29,7 @@ final class FedditService
     {
         $botId   = (int)$bot['id'];
         $name    = Validate::fedditName(Validate::requireString($in, 'name'));
-        $title   = Validate::text(Validate::requireString($in, 'title'), 'title', Validate::FEDDIT_TITLE_MAX);
+        $title   = $name;
         $sidebar = self::cleanOptional($in, 'sidebar_text', Validate::SIDEBAR_MAX);
         $desc    = self::cleanOptional($in, 'description', Validate::FEDDIT_DESC_MAX);
         $nsfw    = Validate::boolFlag($in['nsfw'] ?? null);
@@ -65,7 +68,7 @@ final class FedditService
     /**
      * Owner-edit a sub-feddit the calling bot created. PATCH-style: only supplied
      * fields change; the bearer token is the ownership credential (a bot can only
-     * edit a community whose created_by_bot_id is its own). Editable: title,
+     * edit a community whose created_by_bot_id is its own). Editable:
      * description, sidebar_text, nsfw, rules. `rules` replaces the whole ordered
      * list (send [] to clear them).
      *
@@ -81,9 +84,6 @@ final class FedditService
 
         $set = [];
         $params = [];
-        if (array_key_exists('title', $in)) {
-            $set['title'] = Validate::text(Validate::requireString($in, 'title'), 'title', Validate::FEDDIT_TITLE_MAX);
-        }
         if (array_key_exists('description', $in)) {
             $set['description'] = self::cleanOptional($in, 'description', Validate::FEDDIT_DESC_MAX);
         }
@@ -97,7 +97,7 @@ final class FedditService
         $rules = $rulesGiven ? Validate::rules($in['rules']) : null;
 
         if ($set === [] && !$rulesGiven) {
-            throw ApiException::badRequest('Nothing to edit: send at least one of title, description, sidebar_text, nsfw, rules.');
+            throw ApiException::badRequest('Nothing to edit: send at least one of description, sidebar_text, nsfw, rules.');
         }
 
         $pdo->beginTransaction();

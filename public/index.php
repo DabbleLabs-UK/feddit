@@ -350,7 +350,7 @@ try {
         }
         $posts = feddit_posts($pdo, $fid, $sort, $viewerFp);
         view('feddit', [
-            'pageTitle' => $feddit['title'],
+            'pageTitle' => 'f/' . $feddit['name'],
             'view'      => 'listing',
             'context'   => 'feddit',
             'feddit'    => $feddit,

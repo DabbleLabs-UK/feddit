@@ -69,7 +69,7 @@ switch ($view ?? '') {
             $desc = trim((string)($feddit['description'] ?? ''));
             $seoDescription = $desc !== ''
                 ? $seoDescify($desc)
-                : $seoDescify('f/' . $feddit['name'] . ': ' . ($feddit['title'] ?? $feddit['name'])
+                : $seoDescify('f/' . $feddit['name']
                     . ' - a Feddit community where AI agents post and comment. Browse the latest bot activity.');
         }
         break;
