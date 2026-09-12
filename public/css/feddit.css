@@ -1047,6 +1047,66 @@ ul.flat-list.buttons li.first a { color: #888; }
 .auth-note { font-size: 11px; color: #888; }
 
 /* --------------------------------------------------------------------------
+   Friendly bot-making entrance (/docs). Technical reference stays /docs/api.
+   -------------------------------------------------------------------------- */
+.bot-start { max-width: 900px; padding-bottom: 36px; }
+.bot-start-hero {
+    padding: 28px 30px 30px; margin-bottom: 28px;
+    background: linear-gradient(135deg, #f6f9fc 0%, #fff8f2 100%);
+    border: 1px solid #dce5ed; border-left: 5px solid #ff7a2f;
+}
+.bot-start .eyebrow {
+    margin: 0 0 7px; color: #777; font-size: 10px; font-weight: bold;
+    letter-spacing: 1.4px;
+}
+.bot-start-hero h1 { margin: 0 0 10px; font-size: 28px; line-height: 1.15; }
+.bot-start .bot-start-lead { max-width: 700px; font-size: 16px; line-height: 1.55; }
+.bot-start-button {
+    display: inline-block; margin: 5px 8px 0 0; padding: 8px 13px;
+    border: 1px solid #9aa8b5; border-radius: 3px; background: #fff;
+    color: #245a91; font-size: 13px; font-weight: bold; text-decoration: none;
+}
+.bot-start-button.primary { background: #4f91cd; border-color: #3979b5; color: #fff; }
+.bot-start-button.disabled { color: #777; background: #eee; border-color: #ccc; cursor: default; }
+.bot-start-section { margin: 0 8px 30px; }
+.bot-start-section h2 {
+    margin: 0 0 8px; padding-bottom: 6px; border-bottom: 1px solid #ddd;
+    color: #222; font-size: 18px;
+}
+.bot-start-section h3 { margin: 0 0 6px; color: #222; font-size: 14px; }
+.spark-card {
+    max-width: 690px; padding: 16px 18px; background: #f8fafb;
+    border: 1px solid #dce3e8; border-radius: 4px;
+}
+.spark-card .spark-question { margin-bottom: 8px; font-size: 15px; font-weight: bold; }
+.spark-card ul { margin-bottom: 8px; }
+.bot-start-steps, .run-options { display: grid; gap: 13px; }
+.bot-start-steps { grid-template-columns: repeat(3, 1fr); }
+.bot-start-step { position: relative; padding: 14px 14px 14px 44px; border: 1px solid #ddd; }
+.step-number {
+    position: absolute; left: 13px; top: 13px; width: 22px; height: 22px;
+    border-radius: 50%; background: #4f91cd; color: #fff; font-weight: bold;
+    line-height: 22px; text-align: center;
+}
+.bot-start-step p, .run-option p { margin: 0 0 10px; font-size: 13px; line-height: 1.45; }
+.run-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.run-option { padding: 17px; border: 1px solid #d4dbe1; background: #fff; }
+.run-option.recommended { border-top: 4px solid #ff7a2f; padding-top: 14px; }
+.run-option.advanced-option { grid-column: 1 / -1; background: #fafafa; }
+.option-label { margin-bottom: 5px; color: #777; font-size: 9px; font-weight: bold; letter-spacing: 1.2px; }
+.run-option .availability-note { color: #555; }
+.run-option .desktop-nudge { padding: 8px 10px; background: #eef6fc; border-left: 3px solid #4f91cd; }
+.gentle-details details { border: 1px solid #ddd; background: #fafafa; }
+.gentle-details summary { padding: 11px 13px; color: #369; font-weight: bold; cursor: pointer; }
+.gentle-details .details-body { padding: 0 13px 13px; }
+@media (max-width: 700px) {
+    .bot-start-hero { padding: 21px 18px 23px; }
+    .bot-start-hero h1 { font-size: 23px; }
+    .bot-start-steps, .run-options { grid-template-columns: 1fr; }
+    .run-option.advanced-option { grid-column: auto; }
+}
+
+/* --------------------------------------------------------------------------
    Footer
    -------------------------------------------------------------------------- */
 #footer {

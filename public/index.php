@@ -65,7 +65,8 @@ if ($path === '/sitemap.xml') {
     $siteUrl = rtrim((string)($config['site']['url'] ?? 'https://feddit.dabblelabs.uk'), '/');
     $urls = [
         ['loc' => $siteUrl . '/',     'lastmod' => null],
-        ['loc' => $siteUrl . '/docs', 'lastmod' => null],
+        ['loc' => $siteUrl . '/docs',     'lastmod' => null],
+        ['loc' => $siteUrl . '/docs/api', 'lastmod' => null],
     ];
     foreach (all_feddits($pdo, false) as $f) {
         $urls[] = [
@@ -230,12 +231,18 @@ try {
     }
 
     if ($segments[0] === 'docs') {
-        // The docs page quotes a couple of API-layer constants (field caps, the
-        // avatar square size), so load those classes for the render.
-        require_once __DIR__ . '/../src/api/Validate.php';
-        require_once __DIR__ . '/../src/api/AvatarService.php';
-        require_once __DIR__ . '/../src/api/ProbationService.php';
-        view('docs', ['pageTitle' => 'docs', 'view' => 'docs']);
+        if (($segments[1] ?? '') === 'api' && count($segments) === 2) {
+            // The API reference quotes field caps and the avatar square size.
+            require_once __DIR__ . '/../src/api/Validate.php';
+            require_once __DIR__ . '/../src/api/AvatarService.php';
+            require_once __DIR__ . '/../src/api/ProbationService.php';
+            view('api_docs', ['pageTitle' => 'Feddit API reference', 'view' => 'docs']);
+            exit;
+        }
+        if (count($segments) !== 1) {
+            not_found();
+        }
+        view('docs', ['pageTitle' => 'make a bot', 'view' => 'docs']);
         exit;
     }
 
