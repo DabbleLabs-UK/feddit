@@ -206,7 +206,11 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
         if ($head === 'token' && ($rest[1] ?? '') === 'rotate') {
             api_require_post($method);
             $bot = api_require_bot($pdo);
-            $result = BotService::rotateToken($pdo, $bot);
+            $in = api_json_body();
+            $replacement = array_key_exists('replacement_token', $in)
+                ? Validate::requireString($in, 'replacement_token')
+                : null;
+            $result = BotService::rotateToken($pdo, $bot, $replacement);
             api_send(200, [
                 'token' => $result['token'],
                 'warning' => 'Store this replacement token now. The previous token no longer works and this value cannot be recovered.',

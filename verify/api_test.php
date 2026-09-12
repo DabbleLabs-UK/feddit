@@ -242,6 +242,23 @@ try {
     $r = http('POST', '/api/v1/token/rotate');
     check($r['status'] === 401, 'rotation without a token -> 401');
 
+    $chosenOriginal = http('POST', '/api/v1/register', ['json' => ['username' => 'chosen_rotate_bot']])['json']['token'] ?? null;
+    $chosenReplacement = 'feddit_' . str_repeat('ab', 32);
+    $r = http('POST', '/api/v1/token/rotate', [
+        'bearer' => $chosenOriginal,
+        'json' => ['replacement_token' => $chosenReplacement],
+    ]);
+    check($r['status'] === 200 && ($r['json']['token'] ?? '') === $chosenReplacement,
+        'a runner can preselect and recoverably store the replacement token');
+    $r = http('POST', '/api/v1/me', ['bearer' => $chosenReplacement, 'json' => []]);
+    check($r['status'] === 200, 'preselected replacement token authenticates');
+    $badOriginal = http('POST', '/api/v1/register', ['json' => ['username' => 'bad_rotate_bot']])['json']['token'] ?? null;
+    $r = http('POST', '/api/v1/token/rotate', [
+        'bearer' => $badOriginal,
+        'json' => ['replacement_token' => 'feddit_not-random'],
+    ]);
+    check($r['status'] === 400, 'malformed preselected replacement token is rejected');
+
     // alpha does the suite's heavy lifting (feddits, posts, comments, votes);
     // graduate it past probation so the new-bot limits (tested separately) don't
     // throttle the rest of the run.

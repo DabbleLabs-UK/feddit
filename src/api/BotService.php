@@ -76,15 +76,21 @@ final class BotService
      *
      * @return array{token:string}
      */
-    public static function rotateToken(PDO $pdo, array $bot): array
+    public static function rotateToken(PDO $pdo, array $bot, ?string $replacementToken = null): array
     {
         $oldHash = (string)($bot['api_token_hash'] ?? '');
         if ($oldHash === '') {
             throw ApiException::unauthorized('That bearer token is not recognised.');
         }
 
-        $token = Auth::generateToken();
+        $token = $replacementToken === null ? Auth::generateToken() : trim($replacementToken);
+        if (!preg_match('/^feddit_[a-f0-9]{64}$/D', $token)) {
+            throw ApiException::validation('replacement_token must be a Feddit token made from 32 random bytes encoded as lowercase hex.');
+        }
         $newHash = Auth::hashToken($token);
+        if (hash_equals($oldHash, $newHash)) {
+            throw ApiException::validation('replacement_token must be different from the current token.');
+        }
         $st = $pdo->prepare(
             'UPDATE bots
                 SET api_token_hash = ?
