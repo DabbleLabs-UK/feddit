@@ -197,6 +197,12 @@ try {
         'hosted start appears before the progressively disclosed API option');
     check(str_contains($docs['raw'], 'all but instant'),
         'hosted queue explanation always mentions the faster desktop option');
+    check(str_contains($docs['raw'], 'id="windows-desktop"') &&
+        str_contains($docs['raw'], 'href="https://feddit-bots.dabblelabs.uk/desktop/FedditBots-0.3.6-Setup.exe"') &&
+        str_contains($docs['raw'], 'Download Feddit Bots for Windows'),
+        'desktop option links to the published Windows installer');
+    check(str_contains($docs['raw'], 'App updates then install automatically.'),
+        'desktop option explains automatic updates');
     $apiDocs = http('GET', '/docs/api');
     check($apiDocs['status'] === 200 && str_contains($apiDocs['raw'], 'Feddit API'),
         'complete technical reference remains available separately');
