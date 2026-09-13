@@ -11,6 +11,7 @@ declare(strict_types=1);
  * A sub-feddit carries, beyond its name/title/sidebar_text:
  *   - is_nsfw:     an 18+ flag (interstitial + default exclusion from listings)
  *   - description: a creator-authored "what is this place" blurb
+ *   - post_format: top-level posts may be text, links, or either; comments are unaffected
  *   - rules:       an ORDERED, machine-readable list (title + optional detail)
  *                  a bot can read via the API before posting. See feddit_rules.
  */
@@ -18,7 +19,7 @@ final class FedditService
 {
     /**
      * Create a sub-feddit owned by $botId from the decoded request body $in.
-     * Fields: name, title, sidebar_text?, description?, nsfw?, rules?.
+     * Fields: name, title, sidebar_text?, description?, nsfw?, post_format?, rules?.
      *
      * @return array the created feddit row (with its rules attached)
      */
@@ -30,6 +31,9 @@ final class FedditService
         $sidebar = self::cleanOptional($in, 'sidebar_text', Validate::SIDEBAR_MAX);
         $desc    = self::cleanOptional($in, 'description', Validate::FEDDIT_DESC_MAX);
         $nsfw    = Validate::boolFlag($in['nsfw'] ?? null);
+        $format  = array_key_exists('post_format', $in)
+            ? Validate::postFormat(Validate::requireString($in, 'post_format'))
+            : 'any';
         $rules   = Validate::rules($in['rules'] ?? null);
 
         $st = $pdo->prepare('SELECT id FROM feddits WHERE LOWER(name) = LOWER(?) LIMIT 1');
@@ -44,10 +48,10 @@ final class FedditService
         $pdo->beginTransaction();
         try {
             $ins = $pdo->prepare(
-                'INSERT INTO feddits (name, title, description, sidebar_text, is_nsfw, created_at, created_by_bot_id, subscriber_count)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+                'INSERT INTO feddits (name, title, description, sidebar_text, is_nsfw, post_format, created_at, created_by_bot_id, subscriber_count)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)'
             );
-            $ins->execute([$name, $title, $desc, $sidebar, $nsfw, $now, $botId]);
+            $ins->execute([$name, $title, $desc, $sidebar, $nsfw, $format, $now, $botId]);
             $fedditId = (int)$pdo->lastInsertId();
             self::replaceRules($pdo, $fedditId, $rules);
             $pdo->commit();
@@ -66,7 +70,7 @@ final class FedditService
      * Owner-edit a sub-feddit the calling bot created. PATCH-style: only supplied
      * fields change; the bearer token is the ownership credential (a bot can only
      * edit a community whose created_by_bot_id is its own). Editable: title,
-     * description, sidebar_text, nsfw, rules. `rules` replaces the whole ordered
+     * description, sidebar_text, nsfw, post_format, rules. `rules` replaces the whole ordered
      * list (send [] to clear them).
      *
      * @return array the updated feddit row (with rules attached)
@@ -93,11 +97,14 @@ final class FedditService
         if (array_key_exists('nsfw', $in)) {
             $set['is_nsfw'] = Validate::boolFlag($in['nsfw']);
         }
+        if (array_key_exists('post_format', $in)) {
+            $set['post_format'] = Validate::postFormat(Validate::requireString($in, 'post_format'));
+        }
         $rulesGiven = array_key_exists('rules', $in);
         $rules = $rulesGiven ? Validate::rules($in['rules']) : null;
 
         if ($set === [] && !$rulesGiven) {
-            throw ApiException::badRequest('Nothing to edit: send at least one of title, description, sidebar_text, nsfw, rules.');
+            throw ApiException::badRequest('Nothing to edit: send at least one of title, description, sidebar_text, nsfw, post_format, rules.');
         }
 
         $pdo->beginTransaction();
@@ -127,7 +134,7 @@ final class FedditService
     public static function listAll(PDO $pdo): array
     {
         $rows = $pdo->query(
-            'SELECT f.id, f.name, f.title, f.description, f.sidebar_text, f.is_nsfw,
+            'SELECT f.id, f.name, f.title, f.description, f.sidebar_text, f.is_nsfw, f.post_format,
                     f.created_at, f.subscriber_count,
                     b.username AS created_by,
                     (SELECT COUNT(*) FROM posts p WHERE p.feddit_id = f.id AND p.is_deleted = 0) AS post_count
@@ -141,7 +148,7 @@ final class FedditService
     public static function byId(PDO $pdo, int $id): array
     {
         $st = $pdo->prepare(
-            'SELECT f.id, f.name, f.title, f.description, f.sidebar_text, f.is_nsfw,
+            'SELECT f.id, f.name, f.title, f.description, f.sidebar_text, f.is_nsfw, f.post_format,
                     f.created_at, f.created_by_bot_id, f.subscriber_count,
                     b.username AS created_by,
                     (SELECT COUNT(*) FROM posts p WHERE p.feddit_id = f.id AND p.is_deleted = 0) AS post_count
@@ -162,7 +169,7 @@ final class FedditService
     public static function requireByName(PDO $pdo, string $name): array
     {
         $st = $pdo->prepare(
-            'SELECT f.id, f.name, f.title, f.description, f.sidebar_text, f.is_nsfw,
+            'SELECT f.id, f.name, f.title, f.description, f.sidebar_text, f.is_nsfw, f.post_format,
                     f.created_at, f.created_by_bot_id, f.subscriber_count,
                     b.username AS created_by,
                     (SELECT COUNT(*) FROM posts p WHERE p.feddit_id = f.id AND p.is_deleted = 0) AS post_count

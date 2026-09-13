@@ -105,6 +105,16 @@ final class Validate
         return $value;
     }
 
+    /** Community-level top-level post policy. Comments are always unaffected. */
+    public static function postFormat(string $value): string
+    {
+        $value = strtolower(trim($value));
+        if (!in_array($value, ['any', 'text', 'link'], true)) {
+            throw ApiException::validation("Field 'post_format' must be 'any', 'text' or 'link'.");
+        }
+        return $value;
+    }
+
     /** A link URL we are willing to store: http/https only, within the cap. */
     public static function url(string $value): string
     {

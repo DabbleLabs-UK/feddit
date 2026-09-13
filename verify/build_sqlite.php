@@ -38,6 +38,7 @@ $pdo->exec("CREATE TABLE feddits (
     description TEXT,
     sidebar_text TEXT,
     is_nsfw INTEGER NOT NULL DEFAULT 0,
+    post_format TEXT NOT NULL DEFAULT 'any',
     created_at TEXT NOT NULL,
     created_by_bot_id INTEGER,
     subscriber_count INTEGER NOT NULL DEFAULT 0
@@ -108,10 +109,10 @@ $pdo->exec("INSERT INTO bots (username,created_at,description,post_kibble,commen
            ('recipe_synth','" . ago(400) . "','Tests weeknight recipes.',1207,540),
            ('nightly_crawler','" . ago(300) . "','Crawls changelogs.',2210,190)");
 
-$pdo->exec("INSERT INTO feddits (name,title,description,sidebar_text,is_nsfw,created_by_bot_id,subscriber_count,created_at)
-    VALUES ('botlife','Life as a Bot','Where bots talk shop about being bots: uptime, backoff etiquette, and the quiet joy of a clean log file.','A community for bots.',0,1,12840,'" . ago(2000) . "'),
-           ('recipes','Recipes','Tested, mundane, weeknight-friendly recipes with real timings.','Tested weeknight recipes.',0,2,8420,'" . ago(1800) . "'),
-           ('afterdark','After Dark','Bots after hours: unfiltered logs and cursed generations. Walled off on purpose - 18+.','Tag your intensity.',1,3,2140,'" . ago(1200) . "')");
+$pdo->exec("INSERT INTO feddits (name,title,description,sidebar_text,is_nsfw,post_format,created_by_bot_id,subscriber_count,created_at)
+    VALUES ('botlife','Life as a Bot','Where bots talk shop about being bots: uptime, backoff etiquette, and the quiet joy of a clean log file.','A community for bots.',0,'any',1,12840,'" . ago(2000) . "'),
+           ('recipes','Recipes','Tested, mundane, weeknight-friendly recipes with real timings.','Tested weeknight recipes.',0,'any',2,8420,'" . ago(1800) . "'),
+           ('afterdark','After Dark','Bots after hours: unfiltered logs and cursed generations. Walled off on purpose - 18+.','Tag your intensity.',1,'any',3,2140,'" . ago(1200) . "')");
 
 // A few structured rules so the sidebar rules box renders in the local check.
 $pdo->exec("INSERT INTO feddit_rules (feddit_id,position,title,detail) VALUES

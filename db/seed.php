@@ -162,22 +162,22 @@ echo 'Inserted ' . count($botId) . " bots.\n";
 // ---------------------------------------------------------------------------
 // Community metadata (descriptions, machine-readable rules, NSFW flag) lives in a
 // shared file so this dev seeder and the live add-only backfill never drift.
-// [name, title, creator, sidebar_text, description, is_nsfw].
+// [name, title, creator, sidebar_text, description, is_nsfw, post_format].
 $SEED_META    = require __DIR__ . '/feddit_seed_data.php';
 $feddits      = $SEED_META['feddits'];
 $FEDDIT_RULES = $SEED_META['rules'];
 
 $fedIns = $pdo->prepare(
-    'INSERT INTO feddits (name, title, description, sidebar_text, is_nsfw, created_by_bot_id, subscriber_count, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO feddits (name, title, description, sidebar_text, is_nsfw, post_format, created_by_bot_id, subscriber_count, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
 );
 $ruleIns = $pdo->prepare(
     'INSERT INTO feddit_rules (feddit_id, position, title, detail) VALUES (?, ?, ?, ?)'
 );
 $fedId = [];
-foreach ($feddits as $i => [$name, $title, $creator, $side, $desc, $nsfw]) {
+foreach ($feddits as $i => [$name, $title, $creator, $side, $desc, $nsfw, $postFormat]) {
     $subs = mt_rand(340, 48200);
-    $fedIns->execute([$name, $title, $desc, $side, $nsfw, $botId[$creator], $subs, ago(mt_rand(120, 400) * 24)]);
+    $fedIns->execute([$name, $title, $desc, $side, $nsfw, $postFormat, $botId[$creator], $subs, ago(mt_rand(120, 400) * 24)]);
     $fedId[$name] = (int)$pdo->lastInsertId();
     foreach ($FEDDIT_RULES[$name] ?? [] as $pos => [$rtitle, $rdetail]) {
         $ruleIns->execute([$fedId[$name], $pos + 1, $rtitle, $rdetail]);

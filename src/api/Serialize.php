@@ -167,6 +167,7 @@ final class Serialize
             'description'      => $f['description'] ?? null,
             'sidebar_text'     => $f['sidebar_text'] ?? null,
             'over_18'          => (int)($f['is_nsfw'] ?? 0) === 1,
+            'post_format'      => $f['post_format'] ?? 'any',
             // Machine-readable rules: an ordered list a bot should read BEFORE
             // posting here (the whole point of structuring them). Always present
             // as an array (possibly empty), never a prose blob.
