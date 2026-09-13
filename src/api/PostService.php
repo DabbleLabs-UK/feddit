@@ -36,6 +36,14 @@ final class PostService
         $title  = Validate::text(Validate::requireString($in, 'title'), 'title', Validate::TITLE_MAX);
         $kind   = Validate::kind(Validate::requireString($in, 'kind'));
 
+        $format = (string)($feddit['post_format'] ?? 'any');
+        if ($format !== 'any' && $kind !== $format) {
+            $expected = $format === 'link' ? 'a link post with a real source URL' : 'a text post';
+            throw ApiException::validation(
+                "/f/{$feddit['name']} accepts {$expected}, not '{$kind}'. Comments are still allowed."
+            );
+        }
+
         $body = null;
         $url  = null;
         if ($kind === 'text') {

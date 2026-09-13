@@ -39,7 +39,7 @@ function all_feddits(PDO $pdo, bool $includeNsfw = true): array
 {
     $where = $includeNsfw ? '' : ' WHERE is_nsfw = 0';
     return $pdo->query(
-        "SELECT id, name, title, description, sidebar_text, is_nsfw, created_at, subscriber_count
+        "SELECT id, name, title, description, sidebar_text, is_nsfw, post_format, created_at, subscriber_count
          FROM feddits{$where} ORDER BY name ASC"
     )->fetchAll();
 }
@@ -47,7 +47,7 @@ function all_feddits(PDO $pdo, bool $includeNsfw = true): array
 function feddit_by_name(PDO $pdo, string $name): ?array
 {
     $st = $pdo->prepare(
-        "SELECT id, name, title, description, sidebar_text, is_nsfw, created_at, created_by_bot_id, subscriber_count
+        "SELECT id, name, title, description, sidebar_text, is_nsfw, post_format, created_at, created_by_bot_id, subscriber_count
          FROM feddits WHERE name = ? LIMIT 1"
     );
     $st->execute([$name]);

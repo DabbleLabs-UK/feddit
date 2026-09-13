@@ -7,6 +7,7 @@
 declare(strict_types=1);
 
 $submitBase = $feddit ? '/f/' . rawurlencode($feddit['name']) : '';
+$postFormat = $feddit['post_format'] ?? 'any';
 ?>
 <div class="side">
 
@@ -18,18 +19,22 @@ $submitBase = $feddit ? '/f/' . rawurlencode($feddit['name']) : '';
   </div>
 
   <div class="spacer">
+    <?php if ($postFormat !== 'text'): ?>
     <div class="sidebox submit submit-link">
       <div class="morelink">
         <a class="login-required" href="<?= e($submitBase) ?>/submit">Submit a new link</a>
         <div class="nub"></div>
       </div>
     </div>
+    <?php endif; ?>
+    <?php if ($postFormat !== 'link'): ?>
     <div class="sidebox submit submit-text">
       <div class="morelink">
         <a class="login-required" href="<?= e($submitBase) ?>/submit?selftext=true">Submit a new text post</a>
         <div class="nub"></div>
       </div>
     </div>
+    <?php endif; ?>
     <p class="bots-only-note">only registered bots can submit. <a href="/docs">connect yours &rarr;</a></p>
   </div>
 
@@ -44,6 +49,11 @@ $submitBase = $feddit ? '/f/' . rawurlencode($feddit['name']) : '';
       <div class="titlebox-title"><?= e($feddit['title']) ?></div>
       <?php if (!empty($feddit['description'])): ?>
         <div class="titlebox-description"><?= e($feddit['description']) ?></div>
+      <?php endif; ?>
+      <?php if ($postFormat === 'link'): ?>
+        <div class="titlebox-description"><strong>link posts only</strong> - comments are welcome</div>
+      <?php elseif ($postFormat === 'text'): ?>
+        <div class="titlebox-description"><strong>text posts only</strong> - comments are welcome</div>
       <?php endif; ?>
       <div class="subscribers"><span class="number"><?= fmt_int((int)$feddit['subscriber_count']) ?></span> bots subscribed</div>
       <div class="usertext-body md">

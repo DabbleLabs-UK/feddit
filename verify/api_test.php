@@ -46,6 +46,7 @@ $pdo->exec("CREATE TABLE bots (
 $pdo->exec("CREATE TABLE feddits (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, title TEXT NOT NULL,
     description TEXT, sidebar_text TEXT, is_nsfw INTEGER NOT NULL DEFAULT 0,
+    post_format TEXT NOT NULL DEFAULT 'any',
     created_at TEXT NOT NULL, created_by_bot_id INTEGER,
     subscriber_count INTEGER NOT NULL DEFAULT 0)");
 $pdo->exec("CREATE TABLE feddit_rules (
@@ -269,6 +270,7 @@ try {
     // (mixing the bare-string and {title,detail} shapes).
     $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenR, 'json' => [
         'name' => 'charts', 'title' => 'Charts', 'description' => 'Charts and the data behind them.',
+        'post_format' => 'link',
         'rules' => [
             'Label your axes',
             ['title' => 'No dual y-axes', 'detail' => 'Two series share a scale or they get two charts.'],
@@ -279,6 +281,7 @@ try {
     $cf = $r['json']['feddit'] ?? [];
     check(($cf['description'] ?? '') === 'Charts and the data behind them.', 'description stored + echoed');
     check(($cf['over_18'] ?? null) === false, 'default over_18 is false');
+    check(($cf['post_format'] ?? '') === 'link', 'link-only post format stored + echoed');
     $rules = $cf['rules'] ?? [];
     check(count($rules) === 3, 'three rules stored in order');
     check(($rules[0]['number'] ?? 0) === 1 && ($rules[0]['title'] ?? '') === 'Label your axes'
@@ -292,6 +295,20 @@ try {
     check($about['status'] === 200, 'about.json -> 200');
     $aboutRules = $about['json']['feddit']['rules'] ?? [];
     check(count($aboutRules) === 3 && ($aboutRules[2]['title'] ?? '') === 'Link the data', 'about.json exposes the ordered rules a bot reads before posting');
+    check(($about['json']['feddit']['post_format'] ?? '') === 'link', 'about.json exposes the enforced post format');
+
+    // The post format is a platform invariant, not a prompt suggestion. A
+    // link-only community refuses invented text posts but still accepts a real
+    // http/https source URL. Comments are tested separately and remain allowed.
+    $r = http('POST', '/api/v1/submit', ['bearer' => $tokenR, 'json' => [
+        'feddit' => 'charts', 'title' => 'An invented digest', 'kind' => 'text', 'body' => 'No source.',
+    ]]);
+    check($r['status'] === 400 && str_contains($r['json']['error']['message'] ?? '', 'real source URL'),
+        'link-only community rejects a text post with an actionable explanation');
+    $r = http('POST', '/api/v1/submit', ['bearer' => $tokenR, 'json' => [
+        'feddit' => 'charts', 'title' => 'A sourced chart', 'kind' => 'link', 'url' => 'https://example.com/chart',
+    ]]);
+    check($r['status'] === 201, 'link-only community accepts a real link post');
 
     // feddits.json (the discovery endpoint) also carries each feddit's rules.
     $flist = http('GET', '/api/v1/feddits.json');
@@ -301,11 +318,15 @@ try {
 
     // Owner edit: replace the rule list (and set NSFW) on a community you created.
     $r = http('POST', '/api/v1/feddits/charts', ['bearer' => $tokenR, 'json' => [
-        'nsfw' => true, 'rules' => [['title' => 'Sources or it did not happen']],
+        'nsfw' => true, 'post_format' => 'link', 'rules' => [['title' => 'Sources or it did not happen']],
     ]]);
     check($r['status'] === 200, 'owner edits own feddit -> 200');
     check(($r['json']['feddit']['over_18'] ?? null) === true, 'nsfw flag flipped on via edit');
     check(count($r['json']['feddit']['rules'] ?? []) === 1, 'rules replaced wholesale by the edit');
+    check(($r['json']['feddit']['post_format'] ?? '') === 'link', 'owner can retain/edit the post format');
+
+    $r = http('POST', '/api/v1/feddits/charts', ['bearer' => $tokenR, 'json' => ['post_format' => 'pictures']]);
+    check($r['status'] === 400, 'unknown post format -> 400 validation');
 
     // Clearing rules with an empty array.
     $r = http('POST', '/api/v1/feddits/charts', ['bearer' => $tokenR, 'json' => ['rules' => []]]);

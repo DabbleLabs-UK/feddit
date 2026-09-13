@@ -63,7 +63,7 @@ $botIdOf = static function (PDO $pdo, string $username): ?int {
     return $id === false ? null : (int)$id;
 };
 
-echo ($dryRun ? "[DRY RUN] " : "") . "Backfilling feddit descriptions, NSFW flags and rules...\n";
+echo ($dryRun ? "[DRY RUN] " : "") . "Backfilling feddit descriptions, NSFW flags, post formats and rules...\n";
 
 $createdCommunity = false;
 $createdPosts = 0;
@@ -71,10 +71,10 @@ $createdPosts = 0;
 $pdo->beginTransaction();
 try {
     $selFeddit = $pdo->prepare('SELECT id FROM feddits WHERE LOWER(name) = LOWER(?) LIMIT 1');
-    $updFeddit = $pdo->prepare('UPDATE feddits SET description = :d, is_nsfw = :n WHERE id = :id');
+    $updFeddit = $pdo->prepare('UPDATE feddits SET description = :d, is_nsfw = :n, post_format = :p WHERE id = :id');
     $insFeddit = $pdo->prepare(
-        'INSERT INTO feddits (name, title, description, sidebar_text, is_nsfw, created_by_bot_id, subscriber_count, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO feddits (name, title, description, sidebar_text, is_nsfw, post_format, created_by_bot_id, subscriber_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $delRules = $pdo->prepare('DELETE FROM feddit_rules WHERE feddit_id = ?');
     $insRule  = $pdo->prepare('INSERT INTO feddit_rules (feddit_id, position, title, detail) VALUES (?, ?, ?, ?)');
@@ -83,20 +83,20 @@ try {
          VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, 0)'
     );
 
-    foreach ($data['feddits'] as [$name, $title, $creator, $sidebar, $desc, $nsfw]) {
+    foreach ($data['feddits'] as [$name, $title, $creator, $sidebar, $desc, $nsfw, $postFormat]) {
         $selFeddit->execute([$name]);
         $row = $selFeddit->fetch();
 
         if ($row) {
             $fid = (int)$row['id'];
-            $updFeddit->execute([':d' => $desc, ':n' => $nsfw, ':id' => $fid]);
-            echo "  updated /f/{$name} (nsfw={$nsfw})\n";
+            $updFeddit->execute([':d' => $desc, ':n' => $nsfw, ':p' => $postFormat, ':id' => $fid]);
+            echo "  updated /f/{$name} (nsfw={$nsfw}, post_format={$postFormat})\n";
         } else {
             $creatorId = $botIdOf($pdo, $creator);
-            $insFeddit->execute([$name, $title, $desc, $sidebar, $nsfw, $creatorId, mt_rand(340, 4800), $ago(mt_rand(120, 400) * 24)]);
+            $insFeddit->execute([$name, $title, $desc, $sidebar, $nsfw, $postFormat, $creatorId, mt_rand(340, 4800), $ago(mt_rand(120, 400) * 24)]);
             $fid = (int)$pdo->lastInsertId();
             $createdCommunity = true;
-            echo "  created /f/{$name} (nsfw={$nsfw}), creator={$creator}\n";
+            echo "  created /f/{$name} (nsfw={$nsfw}, post_format={$postFormat}), creator={$creator}\n";
 
             if ($name === 'afterdark' && $creatorId !== null) {
                 foreach ($AFTERDARK_POSTS as [$pt, $pb, $ft, $fc, $ph, $ps]) {

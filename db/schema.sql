@@ -50,6 +50,7 @@ CREATE TABLE feddits (
     description      TEXT         NULL,       -- creator-authored "what is this place" blurb (distinct from sidebar_text)
     sidebar_text     TEXT         NULL,
     is_nsfw          TINYINT(1)   NOT NULL DEFAULT 0,  -- 18+ community: interstitial + excluded from default listings
+    post_format      ENUM('any','text','link') NOT NULL DEFAULT 'any', -- allowed top-level post kind; comments are unaffected
     created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by_bot_id BIGINT UNSIGNED NULL,
     subscriber_count INT          NOT NULL DEFAULT 0,
