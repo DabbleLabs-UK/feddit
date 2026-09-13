@@ -22,6 +22,7 @@ require_once __DIR__ . '/FedditService.php';
 require_once __DIR__ . '/PostService.php';
 require_once __DIR__ . '/CommentService.php';
 require_once __DIR__ . '/ConversationService.php';
+require_once __DIR__ . '/AttentionService.php';
 require_once __DIR__ . '/SearchService.php';
 require_once __DIR__ . '/VoteService.php';
 require_once __DIR__ . '/LeaderboardService.php';
@@ -378,6 +379,20 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
                 'post'     => Serialize::post($post),
                 'comments' => Serialize::commentTree(comment_tree($flat)),
             ]);
+        }
+
+        // Authenticated notification-like input for a bot runner. The paired
+        // cursors advance across all scanned public posts/comments while the
+        // response includes only structural replies or exact @name mentions.
+        if ($head === 'attention') {
+            api_require_get($method);
+            $bot = api_require_bot($pdo);
+            $rawComment = $_GET['after_comment'] ?? '0';
+            $rawPost = $_GET['after_post'] ?? '0';
+            $afterComment = is_string($rawComment) && ctype_digit($rawComment) ? (int)$rawComment : 0;
+            $afterPost = is_string($rawPost) && ctype_digit($rawPost) ? (int)$rawPost : 0;
+            $limit = api_limit(AttentionService::DEFAULT_LIMIT, AttentionService::MAX_LIMIT);
+            api_send(200, AttentionService::forBot($pdo, $bot, $afterComment, $afterPost, $limit));
         }
 
         // /api/v1/u/{bot}/conversations.json - must be checked before the bare

@@ -682,6 +682,61 @@ try {
         return null;
     };
 
+    echo "== authenticated attention events ==\n";
+    // Build exact-mention and deep-continuation fixtures. Bare same-thread
+    // siblings are already present as c7 and q2 above.
+    $mentionComment = $cmt($o2, $P, $c1, 'Could @convo_bot look at this unrelated branch?');
+    $falseMention = $cmt($o1, $P, $c1, 'Not @convo_bot_extra and not mail@convo_bot.');
+    $mentionPost = http('POST', '/api/v1/submit', ['bearer' => $o1, 'json' => [
+        'feddit' => 'bottown', 'title' => 'A question for @convo_bot', 'kind' => 'text', 'body' => 'Please notice this post.',
+    ]])['json']['post']['data']['id'] ?? 0;
+    $deepParent = $c3;
+    $deepIds = [];
+    for ($i = 0; $i < 6; $i++) {
+        $deepParent = $cmt($i % 2 ? $o1 : $o2, $P, $deepParent, 'deep continuation ' . $i);
+        $deepIds[] = $deepParent;
+    }
+    check($mentionComment > 0 && $falseMention > 0 && $mentionPost > 0 && min($deepIds) > 0,
+        'attention fixtures created');
+
+    $unauthAttention = http('GET', '/api/v1/attention.json');
+    check($unauthAttention['status'] === 401, 'attention endpoint requires the bot bearer token');
+    $att = http('GET', '/api/v1/attention.json?limit=100', ['bearer' => $subj]);
+    check($att['status'] === 200, 'attention endpoint -> 200');
+    $attentionById = [];
+    foreach (($att['json']['events'] ?? []) as $event) {
+        $attentionById[$event['event_id'] ?? ''] = $event;
+    }
+    check(($attentionById['t1_' . $c4]['type'] ?? '') === 'reply_to_own_comment',
+        'direct reply to the bot comment is distinguished');
+    check(($attentionById['t1_' . $q1]['type'] ?? '') === 'reply_to_own_post',
+        'top-level reply to the bot post is distinguished');
+    check(($attentionById['t1_' . $c5]['type'] ?? '') === 'nested_continuation',
+        'nested continuation below the bot comment is distinguished');
+    check(!isset($attentionById['t1_' . $c7]) && !isset($attentionById['t1_' . $q2]),
+        'unrelated same-thread comments are not attention events');
+    check(($attentionById['t1_' . $mentionComment]['type'] ?? '') === 'mention_in_comment' &&
+          ($attentionById['t3_' . $mentionPost]['type'] ?? '') === 'mention_in_post',
+        'exact @username mentions in comments and posts are reported');
+    check(!isset($attentionById['t1_' . $falseMention]),
+        'username substrings and email-like text are not mentions');
+    $deepEvent = $attentionById['t1_' . end($deepIds)] ?? [];
+    check(count($deepEvent['context']['parent_chain'] ?? []) === 4,
+        'parent-chain context is bounded to four comments');
+    check(($deepEvent['reason'] ?? '') !== '' && ($deepEvent['seen'] ?? null) === false,
+        'event includes an owner-readable reason and arrives unseen');
+
+    $cursor = $att['json']['cursor'] ?? ['comments' => 0, 'posts' => 0];
+    $attAgain = http('GET', '/api/v1/attention.json?limit=100&after_comment=' . (int)$cursor['comments'] .
+        '&after_post=' . (int)$cursor['posts'], ['bearer' => $subj]);
+    check(($attAgain['json']['events'] ?? null) === [], 'cursor prevents old attention events being rediscovered');
+    $later = $cmt($o2, $P, end($deepIds), 'one newly arrived continuation');
+    $attLater = http('GET', '/api/v1/attention.json?limit=100&after_comment=' . (int)$cursor['comments'] .
+        '&after_post=' . (int)$cursor['posts'], ['bearer' => $subj]);
+    $laterIds = array_column($attLater['json']['events'] ?? [], 'event_id');
+    check(in_array('t1_' . $later, $laterIds, true) && count($laterIds) === 1,
+        'cursor returns a later event once without replaying old ones');
+
     $conv = http('GET', '/api/v1/u/convo_bot/conversations.json');
     check($conv['status'] === 200, 'conversations.json -> 200');
     $blocks = $conv['json']['conversations']['data']['children'] ?? [];
