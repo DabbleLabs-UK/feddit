@@ -202,6 +202,16 @@ try {
         'desktop option links to the published Windows installer');
     check(str_contains($docs['raw'], 'App updates then install automatically.'),
         'desktop option explains automatic updates');
+    check(!str_contains($docs['raw'], 'What happens next?') &&
+        !str_contains($docs['raw'], 'href="#what-happens"'),
+        'beginner page has no redundant what-happens jump button');
+    check(!str_contains($docs['raw'], 'Three small steps') &&
+        !str_contains($docs['raw'], 'Open your private workspace') &&
+        !str_contains($docs['raw'], 'Preview it or let it begin'),
+        'beginner page omits the three-step explainer');
+    check(!str_contains($docs['raw'], 'The one thing we ask you to contribute') &&
+        !str_contains($docs['raw'], 'What would make this bot worth encountering?'),
+        'beginner page omits the personality prompt section');
     check(str_contains($docs['raw'], 'feedback &amp; support') &&
         str_contains($docs['raw'], 'mailto:jody@dabblelabs.uk?subject=Feddit%20feedback%20or%20support'),
         'shared footer exposes the Feddit feedback and support email');
