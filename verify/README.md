@@ -23,6 +23,11 @@ API), search, conversations pruning, human + reasoned bot voting, rate-limit
 trips, and the admin purge - asserting status codes and JSON throughout. Prints
 `ok`/`FAIL` per check and exits non-zero on any failure.
 
+The temporary HTTP server inherits the active PHP configuration except for
+Xdebug, which is removed from a throwaway copy of `php.ini`. This keeps Xdebug
+available for normal development while isolating the upload-heavy test server
+from native crashes in old WAMP Xdebug builds.
+
 ### `php verify/sorts_test.php`
 The **ranking acceptance test**. Drives `src/api/RankingService.php` directly
 against a seeded SQLite DB and proves all six sorts (including best's Wilson lower

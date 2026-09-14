@@ -101,6 +101,41 @@ file_put_contents($ROOT . '/config/config.local.php', $cfg);
 // -- 3. boot php -S ---------------------------------------------------------
 $docroot = $ROOT . '/public';
 $router  = $docroot . '/index.php';
+
+// The WAMP CLI runtime may load Xdebug globally. Keep it available for normal
+// development, but remove it from this short-lived HTTP test server: an old
+// Xdebug build must not be able to crash the harness while handling uploads.
+$serverIni = null;
+$loadedIni = php_ini_loaded_file();
+if (extension_loaded('xdebug') && is_string($loadedIni) && $loadedIni !== '') {
+    $iniContents = file_get_contents($loadedIni);
+    if ($iniContents === false) {
+        fwrite(STDERR, "Could not read the active php.ini: {$loadedIni}\n");
+        exit(1);
+    }
+
+    $iniLines = preg_split('/\R/', $iniContents);
+    if (!is_array($iniLines)) {
+        fwrite(STDERR, "Could not parse the active php.ini: {$loadedIni}\n");
+        exit(1);
+    }
+    $iniLines = array_values(array_filter($iniLines, static function (string $line): bool {
+        return preg_match('/^\s*(?:zend_extension\s*=.*xdebug|xdebug\.)/i', $line) !== 1;
+    }));
+
+    $serverIni = tempnam(sys_get_temp_dir(), 'feddit-php-');
+    if ($serverIni === false || file_put_contents($serverIni, implode(PHP_EOL, $iniLines)) === false) {
+        if (is_string($serverIni)) {
+            @unlink($serverIni);
+        }
+        fwrite(STDERR, "Could not create an Xdebug-free php.ini for the test server.\n");
+        exit(1);
+    }
+    register_shutdown_function(static function () use ($serverIni): void {
+        @unlink($serverIni);
+    });
+}
+
 // Bail if the port is already taken (a stale dev server would silently answer
 // our requests with the wrong code base).
 $probe = @fsockopen('127.0.0.1', $PORT, $errno, $errstr, 0.3);
@@ -110,7 +145,18 @@ if ($probe) {
     exit(1);
 }
 // Array form -> no cmd.exe shell wrapper, so proc_terminate() kills php.exe itself.
-$argv = [PHP_BINARY, '-S', "127.0.0.1:{$PORT}", '-t', $docroot, $router];
+$argv = [PHP_BINARY];
+if ($serverIni !== null) {
+    $argv[] = '-c';
+    $argv[] = $serverIni;
+}
+$argv[] = '-d';
+$argv[] = 'upload_tmp_dir=' . sys_get_temp_dir();
+$argv[] = '-S';
+$argv[] = "127.0.0.1:{$PORT}";
+$argv[] = '-t';
+$argv[] = $docroot;
+$argv[] = $router;
 $descr = [0 => ['pipe', 'r'], 1 => ['file', $LOG, 'w'], 2 => ['file', $LOG, 'a']];
 $proc = proc_open($argv, $descr, $pipes, $docroot);
 if (!is_resource($proc)) {
