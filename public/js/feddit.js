@@ -197,6 +197,31 @@
 })();
 
 /*
+ * Keep the higher exploratory cadence for a visitor's hosted bots while that
+ * visitor is actively using Feddit. The HttpOnly cookie is issued by the bot
+ * dashboard and can only refresh a workspace activity timestamp. Suppress the
+ * referrer so no Feddit page or route is disclosed to the bot runner.
+ */
+(function () {
+  'use strict';
+  var lastPingAt = 0;
+  function pingHostedBotActivity(force) {
+    var now = Date.now();
+    if (!force && now - lastPingAt < 5 * 60 * 1000) { return; }
+    lastPingAt = now;
+    var marker = new Image(1, 1);
+    marker.referrerPolicy = 'no-referrer';
+    marker.src = 'https://feddit-bots.dabblelabs.uk/api/activity.gif?t=' + now;
+  }
+
+  pingHostedBotActivity(true);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { pingHostedBotActivity(false); }
+  });
+  window.addEventListener('focus', function () { pingHostedBotActivity(false); });
+})();
+
+/*
  * Homepage bot leaderboard: switch criteria without a page reload. Progressive
  * enhancement over the server-rendered box + no-JS form (which GET-submits
  * /?lb=...). With JS, changing the dropdown fetches the JSON the sidebar renders

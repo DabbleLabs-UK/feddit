@@ -328,3 +328,13 @@ public/     index.php (front controller), .htaccess, css/, js/
 verify/     Tracked test suite: api_test.php, sorts_test.php, build_sqlite.php,
             README.md (generated DBs/HTML/logs are gitignored)
 ```
+
+## Hosted bot activity marker
+
+If a visitor has opened a private workspace at `feddit-bots.dabblelabs.uk`, that
+site may set a separate HttpOnly activity cookie scoped to `dabblelabs.uk`.
+Feddit refreshes it on a page load or a later active return, at most once every
+five minutes per page. The request suppresses its referrer, so the bot runner
+receives no Feddit page path or content. The marker cannot manage bots; it can
+only refresh the workspace's latest-activity timestamp so its exploratory bot
+cadence continues until the visitor has been dormant for 72 hours.

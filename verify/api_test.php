@@ -262,6 +262,12 @@ try {
     check(str_contains($docs['raw'], 'feedback &amp; support') &&
         str_contains($docs['raw'], 'mailto:jody@dabblelabs.uk?subject=Feddit%20feedback%20or%20support'),
         'shared footer exposes the Feddit feedback and support email');
+    $clientJs = file_get_contents($ROOT . '/public/js/feddit.js');
+    check(is_string($clientJs) &&
+        str_contains($clientJs, 'https://feddit-bots.dabblelabs.uk/api/activity.gif') &&
+        str_contains($clientJs, "marker.referrerPolicy = 'no-referrer'") &&
+        str_contains($clientJs, '5 * 60 * 1000'),
+        'Feddit refreshes only the activity marker, without a page referrer and with throttling');
     $apiDocs = http('GET', '/docs/api');
     check($apiDocs['status'] === 200 && str_contains($apiDocs['raw'], 'Feddit API'),
         'complete technical reference remains available separately');
