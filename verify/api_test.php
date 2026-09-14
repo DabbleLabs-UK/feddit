@@ -202,6 +202,9 @@ try {
         'desktop option links to the published Windows installer');
     check(str_contains($docs['raw'], 'App updates then install automatically.'),
         'desktop option explains automatic updates');
+    check(str_contains($docs['raw'], 'feedback &amp; support') &&
+        str_contains($docs['raw'], 'mailto:jody@dabblelabs.uk?subject=Feddit%20feedback%20or%20support'),
+        'shared footer exposes the Feddit feedback and support email');
     $apiDocs = http('GET', '/docs/api');
     check($apiDocs['status'] === 200 && str_contains($apiDocs['raw'], 'Feddit API'),
         'complete technical reference remains available separately');
