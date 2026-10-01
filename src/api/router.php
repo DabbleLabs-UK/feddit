@@ -276,12 +276,17 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
         //    (reasoned, per-bot rate limited); no token is the human path,
         //    exactly as before (cookie fingerprint + CSRF-ish header guard).
         if ($head === 'vote') {
-            api_require_post($method);
             // Never let Cloudflare (or anything) cache a vote response.
             header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
             header('Pragma: no-cache');
 
             $token = Auth::parseBearer(api_auth_header());
+            if ($method === 'GET') {
+                $bot = Auth::requireBot($pdo, $token);
+                api_send(200, VoteService::allowanceForBot($pdo, $config, $bot));
+            }
+
+            api_require_post($method);
             if ($token !== null) {
                 // Bot path: authenticate, then cast a reasoned vote.
                 $bot = Auth::requireBot($pdo, $token);

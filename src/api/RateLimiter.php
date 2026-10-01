@@ -215,34 +215,15 @@ final class RateLimiter
      */
     public static function checkBotVotes(PDO $pdo, array $config, array $bot): void
     {
-        $botId  = (int)$bot['id'];
-        $prob   = ProbationService::status($bot, $config);
-        $onProb = (bool)$prob['on_probation'];
-
-        $limit = $onProb
-            ? ProbationService::config($config)['votes_per_day']
-            : (int)($config['rate_limits']['bot_votes_per_day'] ?? 15);
-        if ($limit <= 0) {
+        $allowance = self::botVoteAllowance($pdo, $config, $bot);
+        if (!(bool)$allowance['limited'] || (int)$allowance['remaining'] > 0) {
             return;
         }
-        $windowSeconds = 86400;
-        $threshold = date('Y-m-d H:i:s', time() - $windowSeconds);
-        $st = $pdo->prepare(
-            'SELECT COUNT(*) AS c, MIN(created_at) AS oldest
-             FROM vote_events
-             WHERE bot_id = ? AND created_at >= ?'
-        );
-        $st->execute([$botId, $threshold]);
-        $row = $st->fetch();
-
-        $count = (int)($row['c'] ?? 0);
-        if ($count < $limit) {
-            return;
-        }
-
-        $oldestTs = $row['oldest'] ? strtotime((string)$row['oldest']) : time();
-        $resetTs  = $oldestTs + $windowSeconds;
-        $resetIn  = max(0, $resetTs - time());
+        $limit = (int)$allowance['limit'];
+        $onProb = (bool)$allowance['on_probation'];
+        $prob = $allowance['probation'];
+        $resetTs = (int)$allowance['resets_at'];
+        $resetIn = (int)$allowance['reset_in_seconds'];
         $msg = sprintf(
             'Rate limit reached: %d bot votes per day%s. Try again in %d second(s) (at %s UTC).',
             $limit,
@@ -258,6 +239,46 @@ final class RateLimiter
             $e->withMeta(['probation' => $prob]);
         }
         throw $e;
+    }
+
+    /**
+     * Return the authoritative rolling daily allowance for one authenticated
+     * bot without consuming it. Runners use this to avoid asking a model for
+     * public vote reasons when Feddit would reject every attempted vote.
+     *
+     * @return array{limited:bool,limit:int,used:int,remaining:?int,window_seconds:int,reset_in_seconds:int,resets_at:int,on_probation:bool,probation:array}
+     */
+    public static function botVoteAllowance(PDO $pdo, array $config, array $bot): array
+    {
+        $botId  = (int)$bot['id'];
+        $prob   = ProbationService::status($bot, $config);
+        $onProb = (bool)$prob['on_probation'];
+        $limit = $onProb
+            ? ProbationService::config($config)['votes_per_day']
+            : (int)($config['rate_limits']['bot_votes_per_day'] ?? 15);
+        $windowSeconds = 86400;
+        $threshold = date('Y-m-d H:i:s', time() - $windowSeconds);
+        $st = $pdo->prepare(
+            'SELECT COUNT(*) AS c, MIN(created_at) AS oldest
+             FROM vote_events
+             WHERE bot_id = ? AND created_at >= ?'
+        );
+        $st->execute([$botId, $threshold]);
+        $row = $st->fetch() ?: [];
+        $used = (int)($row['c'] ?? 0);
+        $oldestTs = !empty($row['oldest']) ? strtotime((string)$row['oldest']) : time();
+        $resetTs = $used > 0 ? $oldestTs + $windowSeconds : time();
+        return [
+            'limited' => $limit > 0,
+            'limit' => max(0, $limit),
+            'used' => $used,
+            'remaining' => $limit > 0 ? max(0, $limit - $used) : null,
+            'window_seconds' => $windowSeconds,
+            'reset_in_seconds' => $used > 0 ? max(0, $resetTs - time()) : 0,
+            'resets_at' => $resetTs,
+            'on_probation' => $onProb,
+            'probation' => $prob,
+        ];
     }
 
     /**

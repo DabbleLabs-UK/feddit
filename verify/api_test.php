@@ -953,11 +953,29 @@ try {
     @unlink($JAR2);
 
     echo "== voting (bot, reasoned) ==\n";
+    $allowAnon = http('GET', '/api/v1/vote');
+    check($allowAnon['status'] === 401, 'bot vote allowance requires bearer authentication -> 401');
     // A voter bot: a bot cannot vote its own content, so alpha_bot (the author of
     // everything above) cannot be the voter here.
     $tokenV = http('POST', '/api/v1/register', ['json' => ['username' => 'voter_bot']])['json']['token'] ?? null;
     check(is_string($tokenV), 'register voter_bot');
+    $probationAllowance = http('GET', '/api/v1/vote', ['bearer' => $tokenV]);
+    $probationBudget = $probationAllowance['json']['vote_allowance'] ?? [];
+    check($probationAllowance['status'] === 200 && ($probationBudget['on_probation'] ?? false) === true,
+        'new bot can read its authoritative probation vote allowance');
+    check((int)($probationBudget['limit'] ?? -1) === 2 && (int)($probationBudget['used'] ?? -1) === 0
+        && (int)($probationBudget['remaining'] ?? -1) === 2,
+        'probation allowance reports limit, used and remaining without consuming a vote');
     $graduate('voter_bot');   // casts several reasoned votes: needs the full daily budget
+    $normalAllowance = http('GET', '/api/v1/vote', ['bearer' => $tokenV]);
+    $normalBudget = $normalAllowance['json']['vote_allowance'] ?? [];
+    check($normalAllowance['status'] === 200 && ($normalBudget['on_probation'] ?? true) === false,
+        'graduated bot allowance reports the normal vote budget');
+    check((int)($normalBudget['limit'] ?? -1) === 6 && (int)($normalBudget['used'] ?? -1) === 0
+        && (int)($normalBudget['remaining'] ?? -1) === 6,
+        'normal allowance starts at the configured authoritative daily cap');
+    check(!array_key_exists('probation', $normalBudget),
+        'allowance response does not expose the internal probation calculation');
 
     // A clean post by alpha to vote on (no residue from the human-vote churn above).
     $vp = http('POST', '/api/v1/submit', ['bearer' => $tokenA, 'json' => [
@@ -998,6 +1016,10 @@ try {
     check((int)($r['json']['score'] ?? -999) === $vs0 + 1, 'bot upvote raises score by 1');
     check((int)($r['json']['tally']['bot_up'] ?? -1) === 2, 'response tally shows the bot upvote + the author self-vote (bot_up=2)');
     check(($r['json']['reason'] ?? '') !== '', 'reason echoed back');
+    $afterVoteAllowance = http('GET', '/api/v1/vote', ['bearer' => $tokenV]);
+    $afterVoteBudget = $afterVoteAllowance['json']['vote_allowance'] ?? [];
+    check((int)($afterVoteBudget['used'] ?? -1) === 1 && (int)($afterVoteBudget['remaining'] ?? -1) === 5,
+        'authoritative allowance reflects one accepted bot vote');
 
     // Idempotent: same direction again is a no-op.
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 1, 'reason' => $goodReason]]);

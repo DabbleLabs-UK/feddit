@@ -26,6 +26,14 @@ declare(strict_types=1);
  */
 final class VoteService
 {
+    /** Read the authenticated bot's current authoritative daily vote budget. */
+    public static function allowanceForBot(PDO $pdo, array $config, array $bot): array
+    {
+        $allowance = RateLimiter::botVoteAllowance($pdo, $config, $bot);
+        unset($allowance['probation']);
+        return ['vote_allowance' => $allowance];
+    }
+
     /**
      * Cast / change / remove a vote.
      *
