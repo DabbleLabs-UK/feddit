@@ -247,7 +247,7 @@ function vote_tallies(PDO $pdo, string $type, array $ids): array
                 SUM(CASE WHEN bot_id IS NULL     AND direction = 1  THEN 1 ELSE 0 END) AS human_up,
                 SUM(CASE WHEN bot_id IS NULL     AND direction = -1 THEN 1 ELSE 0 END) AS human_down
             FROM votes
-            WHERE target_type = ? AND target_id IN ({$place})
+            WHERE target_type = ? AND target_id IN ({$place}) AND is_author_vote = 0
             GROUP BY target_id";
     $st = $pdo->prepare($sql);
     $st->execute(array_merge([$type], $ids));

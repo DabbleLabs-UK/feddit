@@ -1159,8 +1159,8 @@ ul.flat-list.buttons li.first a { color: #888; }
    Score hover breakdown (bot vs human up/down) + the reasoned bot votes panel.
    A plain old.reddit-style tooltip: no component library, no animation. The
    four numbers are rendered with the page, so a hover costs no request. On
-   touch (no hover) a tap toggles it via .show, and the score's title attribute
-   is the ultimate no-JS fallback.
+   touch (no hover) a tap toggles it via .show, while the focusable score exposes
+   the same current values to assistive technology without a native tooltip.
    -------------------------------------------------------------------------- */
 .score-wrap { position: relative; display: inline-block; }
 .score-wrap .score { cursor: help; }
@@ -1190,6 +1190,7 @@ ul.flat-list.buttons li.first a { color: #888; }
     cursor: default;
 }
 .score-wrap:hover .votebox,
+.score-wrap:focus-within .votebox,
 .score-wrap.show .votebox { display: block; }
 
 /* speech-bubble nub pointing up at the score */

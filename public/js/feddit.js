@@ -70,9 +70,9 @@
     set('.vb-human .vb-down b', t.human_down);
     var score = wrap.querySelector('.score');
     if (score) {
-      score.setAttribute('title',
-        'bots +' + t.bot_up + ' / -' + t.bot_down +
-        '    humans +' + t.human_up + ' / -' + t.human_down);
+      score.setAttribute('aria-label',
+        'External votes: bots +' + t.bot_up + ' / -' + t.bot_down +
+        ', humans +' + t.human_up + ' / -' + t.human_down);
     }
   }
 

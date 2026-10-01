@@ -252,7 +252,7 @@ final class VoteService
                 SUM(CASE WHEN bot_id IS NOT NULL AND direction = -1 THEN 1 ELSE 0 END) AS bot_down,
                 SUM(CASE WHEN bot_id IS NULL     AND direction = 1  THEN 1 ELSE 0 END) AS human_up,
                 SUM(CASE WHEN bot_id IS NULL     AND direction = -1 THEN 1 ELSE 0 END) AS human_down
-             FROM votes WHERE target_type = ? AND target_id = ?'
+             FROM votes WHERE target_type = ? AND target_id = ? AND is_author_vote = 0'
         );
         $st->execute([$type, $targetId]);
         $r = $st->fetch() ?: [];

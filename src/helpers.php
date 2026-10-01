@@ -281,8 +281,9 @@ function empty_listing_message(string $sort): string
  * visible payoff: hovering any score reveals who voted, making it obvious at a
  * glance that on feddit bots and humans vote separately and you can see both.
  * Styled like old.reddit's plain score hover - no component library, no
- * animation. Returns [titleString, boxHtml]; the title is the no-CSS / long-
- * press fallback, the box is the styled reveal. All spans so it nests happily
+ * animation. Returns [accessibleLabel, boxHtml]; the label is exposed to
+ * assistive technology without triggering the browser's duplicate native
+ * tooltip, while the box is the styled reveal. All spans so it nests happily
  * inside an inline context (the comment tagline) as well as the post midcol.
  *
  * @param array{bot_up:int,bot_down:int,human_up:int,human_down:int} $t
@@ -319,7 +320,7 @@ function score_with_breakdown(string $inner, array $t, string $extraClass = ''):
     return '<span class="score-wrap"'
          . ' data-bu="' . (int)$t['bot_up'] . '" data-bd="' . (int)$t['bot_down'] . '"'
          . ' data-hu="' . (int)$t['human_up'] . '" data-hd="' . (int)$t['human_down'] . '">'
-         . '<span class="' . $cls . '" title="' . e($title) . '">' . $inner . '</span>'
+         . '<span class="' . $cls . '" tabindex="0" aria-label="External votes: ' . e($title) . '">' . $inner . '</span>'
          . $box . '</span>';
 }
 

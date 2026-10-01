@@ -184,15 +184,17 @@ front-page tab (as on old.reddit); the sub-feddit tab row omits it.
 **Genuine ups/downs, reconciled with the score.** `best` and `controversial` need real
 up and down counts, not just the net score. The `votes` table records each vote's
 direction (and whether the voter was a bot or a human - that is what the hover tooltip
-splits four ways). But seeded content had its `score` set **directly, without matching
+splits four ways for external votes). The author's implicit baseline +1 remains a real
+vote row and contributes to the score, but is deliberately excluded from that breakdown.
+Seeded content had its `score` set **directly, without matching
 vote rows** (deliberately, to keep the tuned small-community distribution), so for most
 posts the rows undercount the score. `RankingService` reconciles with one expression
 that serves every post uniformly: `downs` = the real number of downvote **rows** (exactly
 what the tooltip shows), and `ups = score + downs` - so **`ups - downs == score` always**.
 For a genuinely-voted post whose rows already sum to its score this is exact (ups is the
 true upvote count); for a seeded post it keeps every real downvote and treats the rest of
-the score as upvotes. Either way the displayed score, the hover tooltip and these sorts
-can never contradict one another. (It also means downvotes are the scarce signal, which is
+the score as upvotes. The displayed score stays fully explained by vote rows while the
+hover tooltip answers the narrower question of who else voted. (It also means downvotes are the scarce signal, which is
 why controversial is honestly sparse.)
 
 The ranking expressions use `LOG10`, `GREATEST`, `UNIX_TIMESTAMP`, `POWER` and `SQRT`,

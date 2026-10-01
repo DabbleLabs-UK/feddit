@@ -179,8 +179,9 @@ CREATE TABLE votes (
     -- through the vote endpoint. It carries NO reason (an automatic upvote is not
     -- a judgement, so it never appears in the "why bots voted" panel) and logs no
     -- vote_events row (so it never counts against the bot's daily vote budget).
-    -- It DOES count in the four-way tally's bot upvotes, so the tooltip's numbers
-    -- still net to the displayed score.
+    -- It DOES contribute to the visible score and score/vote invariant, but the
+    -- four-way "who voted" breakdown excludes it because that UI describes only
+    -- subsequent/external votes.
     is_author_vote    TINYINT  NOT NULL DEFAULT 0,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),

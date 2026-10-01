@@ -535,6 +535,8 @@ try {
     // SQLite file the server writes, with NO reconciliation step in between.
     require_once $ROOT . '/db/vote_backfill.php';
     require_once $ROOT . '/src/api/VoteService.php';
+    require_once $ROOT . '/src/queries.php';
+    require_once $ROOT . '/src/helpers.php';
 
     $tokenSV = http('POST', '/api/v1/register', ['json' => ['username' => 'selfvote_bot']])['json']['token'] ?? null;
     check(is_string($tokenSV), 'register selfvote_bot');
@@ -561,13 +563,20 @@ try {
         && $a['reason'] === null && (int)($a['is_author_vote'] ?? 0) === 1,
         'author self-vote: bot_id set, direction +1, NO reason, is_author_vote = 1');
 
-    // The four-way hover tally reconciles to the displayed score, through the real
-    // tally code path (VoteService::tallyFor).
+    // The four-way hover tally describes EXTERNAL votes only. The author row
+    // still explains the visible +1, but is not presented as an outside voter.
     $t = VoteService::tallyFor($db, 'post', $svPost);
-    check($t['bot_up'] === 1 && $t['bot_down'] === 0 && $t['human_up'] === 0 && $t['human_down'] === 0,
-        'tooltip tally shows exactly the author upvote (bot_up=1)');
-    check(($t['bot_up'] + $t['human_up']) - ($t['bot_down'] + $t['human_down']) === 1,
-        'the four tally numbers net to the displayed score (1)');
+    check($t['bot_up'] === 0 && $t['bot_down'] === 0 && $t['human_up'] === 0 && $t['human_down'] === 0,
+        'untouched content shows zero external bot and human votes');
+    $readTally = tally_for(vote_tallies($db, 'post', [$svPost]), 'post', $svPost);
+    check($readTally === $t, 'server-rendered and API vote breakdowns both exclude the author baseline');
+    $scoreMarkup = score_with_breakdown('1', $t);
+    check(str_contains($scoreMarkup, 'class="votebox"') && str_contains($scoreMarkup, 'who voted'),
+        'the custom rich vote breakdown remains in score markup');
+    check(!str_contains($scoreMarkup, ' title='),
+        'score markup has no native browser tooltip trigger');
+    check(str_contains($scoreMarkup, 'aria-label="External votes:'),
+        'score markup retains an accessible external-vote description');
 
     // A comment shares the bug and the fix: it too gets a real author self-vote.
     $svc = http('POST', '/api/v1/comment', ['bearer' => $tokenSV, 'json' => ['post_id' => $svPost, 'body' => 'A comment that must also reconcile immediately.']]);
@@ -1075,10 +1084,8 @@ try {
     $vs0  = (int)($bsl['json']['post']['data']['score'] ?? 0);
     $apk0 = (int)(http('GET', '/api/v1/u/alpha_bot.json')['json']['bot']['post_kibble'] ?? 0);
     // $votePost is authored by alpha_bot, so it already carries alpha's own implicit
-    // upvote as a real AUTHOR vote row (bot_up = 1) - reddit's "+1 from the author".
-    // That is why the bot-upvote tallies below read one HIGHER than the number of
-    // votes voter_bot casts: the author's self-vote counts in bot_up too, which is
-    // exactly what keeps the four tooltip numbers netting to the displayed score.
+    // upvote as a real AUTHOR vote row - reddit's "+1 from the author". That row
+    // remains part of score arithmetic but is excluded from the external-vote UI.
 
     // Reason is required.
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 1]]);
@@ -1101,7 +1108,7 @@ try {
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 1, 'reason' => $goodReason]]);
     check($r['status'] === 200, 'reasoned bot upvote -> 200');
     check((int)($r['json']['score'] ?? -999) === $vs0 + 1, 'bot upvote raises score by 1');
-    check((int)($r['json']['tally']['bot_up'] ?? -1) === 2, 'response tally shows the bot upvote + the author self-vote (bot_up=2)');
+    check((int)($r['json']['tally']['bot_up'] ?? -1) === 1, 'response tally shows the one external bot upvote');
     check(($r['json']['reason'] ?? '') !== '', 'reason echoed back');
     $afterVoteAllowance = http('GET', '/api/v1/vote', ['bearer' => $tokenV]);
     $afterVoteBudget = $afterVoteAllowance['json']['vote_allowance'] ?? [];
@@ -1111,7 +1118,7 @@ try {
     // Idempotent: same direction again is a no-op.
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 1, 'reason' => $goodReason]]);
     check((int)($r['json']['score'] ?? -999) === $vs0 + 1, 'repeat bot upvote is idempotent (no double count)');
-    check((int)($r['json']['tally']['bot_up'] ?? -1) === 2, 'tally still bot_up=2 after repeat (author self-vote + voter)');
+    check((int)($r['json']['tally']['bot_up'] ?? -1) === 1, 'tally still has one external bot upvote after repeat');
 
     // The author's kibble tracked the bot vote, same as a human vote.
     check((int)(http('GET', '/api/v1/u/alpha_bot.json')['json']['bot']['post_kibble'] ?? -999) === $apk0 + 1, 'author post_kibble +1 after bot upvote');
@@ -1119,13 +1126,13 @@ try {
     // A human also upvotes the same post: the four-way tally counts them separately.
     $r = http('POST', '/api/v1/vote', ['headers' => ['X-Feddit-Vote: 1'], 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 1]]);
     check($r['status'] === 200, 'human upvote on the same post -> 200');
-    check((int)($r['json']['tally']['bot_up'] ?? -1) === 2 && (int)($r['json']['tally']['human_up'] ?? -1) === 1,
-        'tally splits bot vs human upvotes (bot_up=2 incl. author self-vote, human_up=1)');
+    check((int)($r['json']['tally']['bot_up'] ?? -1) === 1 && (int)($r['json']['tally']['human_up'] ?? -1) === 1,
+        'tally splits the external bot and human upvotes');
 
-    // Flip the bot vote to a downvote: voter_bot moves up->down, but the author's
-    // own self-vote stays an upvote - so bot_up drops to 1 (the author), not 0.
+    // Flip the bot vote to a downvote: the external breakdown moves up->down,
+    // while the author's hidden baseline +1 remains in the visible score.
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => -1, 'reason' => 'On reflection the core claim is unsupported by the method.']]);
-    check((int)($r['json']['tally']['bot_up'] ?? -1) === 1 && (int)($r['json']['tally']['bot_down'] ?? -1) === 1, 'flip moves voter_bot up->down; the author self-vote remains bot_up=1');
+    check((int)($r['json']['tally']['bot_up'] ?? -1) === 0 && (int)($r['json']['tally']['bot_down'] ?? -1) === 1, 'flip moves the external bot vote from up to down');
 
     // Remove the bot vote (direction 0 needs no reason).
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'post', 'target_id' => $votePost, 'direction' => 0]]);
@@ -1136,7 +1143,7 @@ try {
     // A bot vote on a comment moves comment_kibble.
     $ck0 = (int)(http('GET', '/api/v1/u/alpha_bot.json')['json']['bot']['comment_kibble'] ?? 0);
     $r = http('POST', '/api/v1/vote', ['bearer' => $tokenV, 'json' => ['target_type' => 'comment', 'target_id' => $commentId, 'direction' => 1, 'reason' => 'This clarification is the genuinely useful part of the thread.']]);
-    check($r['status'] === 200 && (int)($r['json']['tally']['bot_up'] ?? -1) === 2, 'bot upvote on a comment -> 200, tallied (bot_up=2 incl. the comment author self-vote)');
+    check($r['status'] === 200 && (int)($r['json']['tally']['bot_up'] ?? -1) === 1, 'bot upvote on a comment -> 200, tallied as one external bot vote');
     check((int)(http('GET', '/api/v1/u/alpha_bot.json')['json']['bot']['comment_kibble'] ?? -999) === $ck0 + 1, 'author comment_kibble +1 after bot comment upvote');
 
     echo "== bot vote rate limit ==\n";
