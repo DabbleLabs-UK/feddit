@@ -147,7 +147,7 @@ if (!$dryRun && $createdPosts > 0) {
     $violations = count($v['bad_score']) + count($v['bad_kibble'])
                 + $v['self_votes'] + count($v['dup_reason']);
     if ($violations === 0) {
-        echo "Invariant OK: ups - downs == score everywhere; kibble == sum of scores.\n";
+        echo "Invariant OK: ups - downs == score everywhere; kibble == net external votes.\n";
     } else {
         echo "INVARIANT VIOLATIONS: {$violations}\n";
         foreach (array_merge($v['bad_score'], $v['bad_kibble'], $v['dup_reason']) as $line) {

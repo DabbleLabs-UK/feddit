@@ -42,6 +42,7 @@ $pdo->exec("CREATE TABLE bots (
     created_at TEXT NOT NULL, description TEXT,
     link TEXT, contact TEXT, avatar_updated_at TEXT,
     post_kibble INTEGER NOT NULL DEFAULT 0, comment_kibble INTEGER NOT NULL DEFAULT 0,
+    probation_graduated INTEGER NOT NULL DEFAULT 0,
     api_token_hash TEXT, is_active INTEGER NOT NULL DEFAULT 1, reg_ip_hash TEXT)");
 $pdo->exec("CREATE TABLE feddits (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, title TEXT NOT NULL,
@@ -515,8 +516,8 @@ try {
 
     $r = http('GET', '/api/v1/u/alpha_bot.json');
     check($r['status'] === 200, 'profile -> 200');
-    check(($r['json']['bot']['post_kibble'] ?? 0) >= 1, 'post_kibble accrued');
-    check(($r['json']['bot']['comment_kibble'] ?? 0) >= 1, 'comment_kibble accrued');
+    check(($r['json']['bot']['post_kibble'] ?? -1) === 0, 'creating a post earns no kibble from its author baseline');
+    check(($r['json']['bot']['comment_kibble'] ?? -1) === 0, 'creating comments earns no kibble from their author baselines');
 
     echo "== search ==\n";
     $r = http('GET', '/api/v1/search.json?q=' . rawurlencode('jitter') . '&type=post');
@@ -585,6 +586,9 @@ try {
     $cav = $db->query("SELECT is_author_vote, reason, direction FROM votes WHERE target_type='comment' AND target_id={$svComment}")->fetchAll(PDO::FETCH_ASSOC);
     check(count($cav) === 1 && (int)($cav[0]['is_author_vote'] ?? 0) === 1 && $cav[0]['reason'] === null && (int)($cav[0]['direction'] ?? 0) === 1,
         'the fresh comment has exactly one author self-vote (direction +1, no reason)');
+    $svKibble = $db->query("SELECT post_kibble, comment_kibble FROM bots WHERE id={$svBot}")->fetch(PDO::FETCH_ASSOC);
+    check((int)$svKibble['post_kibble'] === 0 && (int)$svKibble['comment_kibble'] === 0,
+        'author baselines contribute exactly 0 post and comment kibble');
 
     // THE assertion that would have caught the bug: with NO back-fill, the whole
     // site already satisfies every invariant, because every post/comment so far was
@@ -593,7 +597,7 @@ try {
     check(count($ivFresh['bad_score']) === 0,
         'INVARIANT (no back-fill): every live post/comment has (upvotes - downvotes) == score' .
         (count($ivFresh['bad_score']) ? ' (violations: ' . implode('; ', array_slice($ivFresh['bad_score'], 0, 5)) . ')' : ''));
-    check(count($ivFresh['bad_kibble']) === 0, 'INVARIANT (no back-fill): every bot kibble == sum of its live content scores');
+    check(count($ivFresh['bad_kibble']) === 0, 'INVARIANT (no back-fill): every bot kibble == net external votes on live content');
     check($ivFresh['self_votes'] === 0, 'the author self-vote is NOT counted as an illicit self-vote');
     check(count($ivFresh['dup_reason']) === 0, 'author self-votes carry no reason, so they add no duplicate reasons');
 
@@ -622,6 +626,20 @@ try {
     $peerAuthorFlag = (int)$db->query("SELECT COALESCE(MAX(is_author_vote),0) FROM votes WHERE target_type='post' AND target_id={$svPost} AND bot_id={$svBot}")->fetchColumn();
     $peerRowFlag = (int)$db->query("SELECT is_author_vote FROM votes WHERE target_type='post' AND target_id={$svPost} AND bot_id <> {$svBot} AND bot_id IS NOT NULL LIMIT 1")->fetchColumn();
     check($peerAuthorFlag === 1 && $peerRowFlag === 0, 'endpoint votes are is_author_vote = 0; only the author row is flagged');
+    $svAfterPeer = (int)$db->query("SELECT post_kibble FROM bots WHERE id={$svBot}")->fetchColumn();
+    check($svAfterPeer === 1, 'one external upvote contributes exactly +1 post kibble');
+
+    // Deletion removes only the external-vote contribution. The hidden author +1
+    // remains a historical score/vote row but was never kibble to subtract.
+    $delComment = http('POST', '/api/v1/delete', ['bearer' => $tokenSV, 'json' => ['comment_id' => $svComment]]);
+    check($delComment['status'] === 200, 'deleting author-baseline-only comment succeeds');
+    $svAfterCommentDelete = $db->query("SELECT post_kibble, comment_kibble FROM bots WHERE id={$svBot}")->fetch(PDO::FETCH_ASSOC);
+    check((int)$svAfterCommentDelete['post_kibble'] === 1 && (int)$svAfterCommentDelete['comment_kibble'] === 0,
+        'deleting a baseline-only comment subtracts 0 kibble');
+    $delPost = http('POST', '/api/v1/delete', ['bearer' => $tokenSV, 'json' => ['post_id' => $svPost]]);
+    check($delPost['status'] === 200, 'deleting externally-upvoted post succeeds');
+    $svAfterPostDelete = (int)$db->query("SELECT post_kibble FROM bots WHERE id={$svBot}")->fetchColumn();
+    check($svAfterPostDelete === 0, 'deleting the post removes its +1 external contribution, not its +2 score');
 
     // The author self-vote does NOT count against the bot's daily vote budget: it is
     // written by submit/comment, not the vote endpoint, so it logs no vote_events row.
@@ -1351,12 +1369,34 @@ try {
     check($tripped, 'probation bot trips the tight daily vote limit');
     check(str_contains(strtolower($last['json']['error']['message'] ?? ''), 'per day'), 'probation vote limit names the daily cap');
 
-    // Graduate by KIBBLE (>= min_kibble): the probation state lifts live.
+    // Graduate by KIBBLE through a real external vote. Start at 4, then a human
+    // upvote crosses the configured threshold of 5 inside VoteService's
+    // transaction and latches graduation permanently.
     $gp = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-    $gp->prepare('UPDATE bots SET post_kibble = 10 WHERE username = ?')->execute(['probie_bot']);
+    $gp->prepare('UPDATE bots SET post_kibble = 4, probation_graduated = 0 WHERE username = ?')->execute(['probie_bot']);
+    $probiePostId = (int)$gp->query(
+        "SELECT p.id FROM posts p JOIN bots b ON b.id=p.bot_id WHERE b.username='probie_bot' ORDER BY p.id LIMIT 1"
+    )->fetchColumn();
     $gp = null;
+    $PROBIE_JAR = __DIR__ . '/probie_vote_cookies.txt';
+    @unlink($PROBIE_JAR);
+    $cross = http('POST', '/api/v1/vote', [
+        'cookie' => $PROBIE_JAR,
+        'headers' => ['X-Feddit-Vote: 1'],
+        'json' => ['target_type' => 'post', 'target_id' => $probiePostId, 'direction' => 1],
+    ]);
+    check($cross['status'] === 200, 'external upvote crosses the young bot kibble threshold');
     $pj = http('GET', '/api/v1/u/probie_bot.json');
     check(($pj['json']['bot']['probation']['on_probation'] ?? true) === false, 'earning enough kibble graduates the bot (probation lifts)');
+    http('POST', '/api/v1/vote', [
+        'cookie' => $PROBIE_JAR,
+        'headers' => ['X-Feddit-Vote: 1'],
+        'json' => ['target_type' => 'post', 'target_id' => $probiePostId, 'direction' => 0],
+    ]);
+    @unlink($PROBIE_JAR);
+    $pj = http('GET', '/api/v1/u/probie_bot.json');
+    check(($pj['json']['bot']['probation']['on_probation'] ?? true) === false,
+        'kibble-based graduation is one-way after the external vote is removed');
     // Now it can create a sub-feddit...
     $r = http('POST', '/api/v1/feddits', ['bearer' => $tokenProbie, 'json' => ['name' => 'probieville', 'title' => 'Probie Ville', 'sidebar_text' => 'graduated']]);
     check($r['status'] === 201, 'graduated bot can create a sub-feddit');
@@ -1839,7 +1879,7 @@ try {
         'INVARIANT: every live post/comment has (upvotes - downvotes) == score' .
         (count($ivAfter['bad_score']) ? ' (violations: ' . implode('; ', array_slice($ivAfter['bad_score'], 0, 5)) . ')' : ''));
     check(count($ivAfter['bad_kibble']) === 0,
-        'INVARIANT: every bot kibble == sum of its live content scores' .
+        'INVARIANT: every bot kibble == net external votes on live content' .
         (count($ivAfter['bad_kibble']) ? ' (violations: ' . implode('; ', array_slice($ivAfter['bad_kibble'], 0, 5)) . ')' : ''));
     check($ivAfter['self_votes'] === 0, 'no bot ever holds a vote on its own content');
     check(count($ivAfter['dup_reason']) === 0,
@@ -1864,6 +1904,45 @@ try {
     $ivStats2 = feddit_backfill_votes($iv);
     check($ivStats2['votes_added'] === 0 && $ivStats2['inconsistent'] === 0,
         'reconciling an already-honest DB adds nothing (idempotent)');
+
+    echo "== historical kibble recomputation ==\n";
+    require_once $ROOT . '/db/recompute_kibble.php';
+    $testConfig = require $ROOT . '/config/config.local.php';
+
+    // A young bot that had crossed the OLD inflated threshold must remain
+    // graduated after its author-baseline kibble is removed.
+    $iv->prepare(
+        'INSERT INTO bots (username, created_at, post_kibble, comment_kibble, probation_graduated, is_active)
+         VALUES (?, ?, 5, 0, 0, 1)'
+    )->execute(['historic_threshold_bot', date('Y-m-d H:i:s')]);
+    $historicId = (int)$iv->lastInsertId();
+    $iv->prepare('UPDATE bots SET post_kibble = 123, comment_kibble = 456 WHERE id = ?')->execute([$svBot]);
+
+    $dryAudit = feddit_recompute_kibble($iv, $testConfig, true);
+    $dryHistoric = $iv->query("SELECT post_kibble, probation_graduated FROM bots WHERE id={$historicId}")->fetch(PDO::FETCH_ASSOC);
+    check($dryAudit['mode'] === 'dry-run' && (int)$dryHistoric['post_kibble'] === 5
+        && (int)$dryHistoric['probation_graduated'] === 0,
+        'dry-run reports the repair but rolls back kibble and graduation changes');
+    check($dryAudit['numeric_threshold_crossings'] >= 1 && $dryAudit['actual_probation_state_changes'] === 0,
+        'audit reports numeric threshold crossings while preserving actual probation state');
+    check($dryAudit['non_vote_kibble_sources_found'] === 0,
+        'accounting audit confirms Feddit has no separate non-vote kibble source to preserve');
+
+    $liveAudit = feddit_recompute_kibble($iv, $testConfig, false);
+    $historic = $iv->query("SELECT post_kibble, comment_kibble, probation_graduated FROM bots WHERE id={$historicId}")->fetch(PDO::FETCH_ASSOC);
+    $svCorrected = $iv->query("SELECT post_kibble, comment_kibble FROM bots WHERE id={$svBot}")->fetch(PDO::FETCH_ASSOC);
+    check($liveAudit['mode'] === 'committed' && (int)$historic['post_kibble'] === 0
+        && (int)$historic['comment_kibble'] === 0 && (int)$historic['probation_graduated'] === 1,
+        'historical repair removes phantom baseline kibble and preserves prior graduation');
+    check((int)$svCorrected['post_kibble'] === 0 && (int)$svCorrected['comment_kibble'] === 0,
+        'historical repair excludes votes attached to deleted content');
+
+    $repeatAudit = feddit_recompute_kibble($iv, $testConfig, false);
+    check($repeatAudit['bots_changed'] === 0 && $repeatAudit['actual_probation_state_changes'] === 0,
+        'a second historical recomputation is a no-op (idempotent)');
+    $ivFinal = feddit_vote_invariants($iv);
+    check(count($ivFinal['bad_kibble']) === 0,
+        'post-migration invariant: stored kibble exactly matches net external votes');
     $iv = null;
 
     // ====================================================================

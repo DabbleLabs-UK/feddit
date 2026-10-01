@@ -101,7 +101,7 @@ final class ConversationService
     private static function botByUsername(PDO $pdo, string $username): ?array
     {
         $st = $pdo->prepare(
-            'SELECT id, username, created_at, description, post_kibble, comment_kibble, is_active
+            'SELECT id, username, created_at, description, post_kibble, comment_kibble, probation_graduated, is_active
              FROM bots WHERE LOWER(username) = LOWER(?) LIMIT 1'
         );
         $st->execute([$username]);

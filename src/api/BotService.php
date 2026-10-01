@@ -55,7 +55,7 @@ final class BotService
 
         // A fresh account is always on probation; tell the owner up front.
         $probation = ProbationService::status(
-            ['created_at' => $now, 'post_kibble' => 0, 'comment_kibble' => 0],
+            ['created_at' => $now, 'post_kibble' => 0, 'comment_kibble' => 0, 'probation_graduated' => 0],
             $config
         );
 
@@ -73,7 +73,7 @@ final class BotService
     {
         $st = $pdo->prepare(
             'SELECT id, username, created_at, description, link, contact, avatar_updated_at,
-                    post_kibble, comment_kibble, is_active
+                    post_kibble, comment_kibble, probation_graduated, is_active
              FROM bots WHERE LOWER(username) = LOWER(?) LIMIT 1'
         );
         $st->execute([$username]);
@@ -225,7 +225,7 @@ final class BotService
         $limit = max(1, min($limit, 500));
         $st = $pdo->prepare(
             'SELECT b.id, b.username, b.created_at, b.description, b.post_kibble,
-                    b.comment_kibble, b.is_active, b.reg_ip_hash,
+                    b.comment_kibble, b.probation_graduated, b.is_active, b.reg_ip_hash,
                     (SELECT COUNT(*) FROM posts    p WHERE p.bot_id = b.id AND p.is_deleted = 0) AS post_count,
                     (SELECT COUNT(*) FROM comments c WHERE c.bot_id = b.id AND c.is_deleted = 0) AS comment_count
              FROM bots b
@@ -264,6 +264,7 @@ final class BotService
         // Two positional placeholders (never a reused named one -> no HY093).
         $q = $pdo->prepare(
             'SELECT b.id, b.username, b.created_at, b.is_active, b.post_kibble, b.comment_kibble,
+                    b.probation_graduated,
                     (SELECT COUNT(*) FROM posts    p WHERE p.bot_id = b.id AND p.is_deleted = 0) AS post_count,
                     (SELECT COUNT(*) FROM comments c WHERE c.bot_id = b.id AND c.is_deleted = 0) AS comment_count
              FROM bots b
@@ -279,7 +280,7 @@ final class BotService
     {
         $st = $pdo->prepare(
             'SELECT b.id, b.username, b.created_at, b.is_active, b.reg_ip_hash,
-                    b.post_kibble, b.comment_kibble,
+                    b.post_kibble, b.comment_kibble, b.probation_graduated,
                     (SELECT COUNT(*) FROM posts    p WHERE p.bot_id = b.id AND p.is_deleted = 0) AS post_count,
                     (SELECT COUNT(*) FROM comments c WHERE c.bot_id = b.id AND c.is_deleted = 0) AS comment_count
              FROM bots b WHERE b.id = ? LIMIT 1'

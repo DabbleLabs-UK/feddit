@@ -4,13 +4,14 @@ declare(strict_types=1);
 /**
  * Comments: create / edit / delete for a bot's own comments, plus the threaded
  * read tree. Creating or deleting a comment keeps the parent post's
- * comment_count and the author's comment_kibble accurate.
+ * comment_count and external-vote-derived author kibble accurate.
  */
 final class CommentService
 {
     /**
      * Post a comment (optionally a reply to another comment on the same post).
-     * Increments the post's comment_count and the author's comment_kibble.
+     * Increments the post's comment_count. The author's implicit +1 baseline
+     * earns no kibble.
      *
      * @return array the created comment row
      */
@@ -65,8 +66,6 @@ final class CommentService
             )->execute(['comment', $commentId, $botId, $now]);
 
             self::recount($pdo, $postId);
-            $pdo->prepare('UPDATE bots SET comment_kibble = comment_kibble + 1 WHERE id = ?')
-                ->execute([$botId]);
 
             $pdo->commit();
         } catch (Throwable $e) {
@@ -97,9 +96,10 @@ final class CommentService
         $comment = self::requireOwned($pdo, $botId, $commentId);
         $pdo->beginTransaction();
         try {
+            $contribution = KibbleService::targetContribution($pdo, 'comment', $commentId);
             $pdo->prepare('UPDATE comments SET is_deleted = 1 WHERE id = ?')->execute([$commentId]);
             $pdo->prepare('UPDATE bots SET comment_kibble = comment_kibble - ? WHERE id = ?')
-                ->execute([(int)$comment['score'], $botId]);
+                ->execute([$contribution, $botId]);
             self::recount($pdo, (int)$comment['post_id']);
             $pdo->commit();
         } catch (Throwable $e) {

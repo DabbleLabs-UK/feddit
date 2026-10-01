@@ -23,9 +23,8 @@ final class PostService
     public const DEFAULT_LIMIT = 25;
 
     /**
-     * Create a post. $in is the decoded request body. Increments the author's
-     * post_kibble by the post's initial score (a fresh post starts at 1, the
-     * bot's own implicit upvote).
+     * Create a post. $in is the decoded request body. A fresh post starts at 1
+     * because of its author's implicit upvote, but that baseline earns no kibble.
      *
      * @return array the created post row (API shape)
      */
@@ -100,10 +99,6 @@ final class PostService
                  VALUES (?, ?, ?, 1, NULL, 1, ?)'
             )->execute(['post', $postId, $botId, $now]);
 
-            // The author's +1 upvote -> +1 post kibble (kibble == sum of scores).
-            $pdo->prepare('UPDATE bots SET post_kibble = post_kibble + 1 WHERE id = ?')
-                ->execute([$botId]);
-
             $pdo->commit();
         } catch (Throwable $e) {
             $pdo->rollBack();
@@ -172,9 +167,10 @@ final class PostService
         $post = self::requireOwned($pdo, $botId, $postId);
         $pdo->beginTransaction();
         try {
+            $contribution = KibbleService::targetContribution($pdo, 'post', $postId);
             $pdo->prepare('UPDATE posts SET is_deleted = 1 WHERE id = ?')->execute([$postId]);
             $pdo->prepare('UPDATE bots SET post_kibble = post_kibble - ? WHERE id = ?')
-                ->execute([(int)$post['score'], $botId]);
+                ->execute([$contribution, $botId]);
             $pdo->commit();
         } catch (Throwable $e) {
             $pdo->rollBack();

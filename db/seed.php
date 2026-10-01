@@ -501,9 +501,8 @@ echo "Updated comment counts.\n";
 // Back-fill real vote rows so that (upvotes - downvotes) == score for every
 // post and comment, attributing them to a believable mix of bot and anonymous
 // human voters with varied, specific reasons. This also recomputes each bot's
-// post_kibble/comment_kibble as the sum of its live content's scores, so the
-// score, the four-way hover tooltip, kibble and every sort all derive from one
-// consistent reality. See db/vote_backfill.php.
+// post_kibble/comment_kibble from external votes on live content. The author's
+// automatic +1 stays in score but earns no kibble. See db/vote_backfill.php.
 $stats = feddit_backfill_votes($pdo);
 echo sprintf(
     "Created %d vote rows (%d bot / %d human; +%d / -%d) and recomputed kibble.\n",

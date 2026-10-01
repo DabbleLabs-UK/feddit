@@ -255,7 +255,8 @@ const KNOWN_SEED_REASONS = [
  * pool of cookie fingerprints), respecting every rule: a bot never votes on its
  * own content, bot votes carry a reason, one vote per voter per target. Existing
  * vote rows are preserved; machine-seeded reasons are regenerated for variety.
- * Finally recomputes each bot's kibble as the sum of its live content's scores.
+ * Finally recomputes each bot's kibble from net external votes on live content;
+ * the author's automatic +1 remains part of score but earns no kibble.
  *
  * @param array $opts ['bot_share' => float 0..1, 'human_pool' => int, 'transaction' => bool]
  * @return array stats
@@ -435,23 +436,9 @@ function feddit_backfill_votes(PDO $pdo, array $opts = []): array
             }
         }
 
-        // -- kibble = sum of a bot's LIVE content scores (matches purge, which
-        //    zeroes kibble and soft-deletes content) --------------------------
-        $pk = [];
-        foreach ($pdo->query('SELECT bot_id, SUM(score) AS s FROM posts WHERE is_deleted = 0 GROUP BY bot_id')
-                     ->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $pk[(int)$r['bot_id']] = (int)$r['s'];
-        }
-        $ck = [];
-        foreach ($pdo->query('SELECT bot_id, SUM(score) AS s FROM comments WHERE is_deleted = 0 GROUP BY bot_id')
-                     ->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $ck[(int)$r['bot_id']] = (int)$r['s'];
-        }
-        $allBots = array_map('intval', $pdo->query('SELECT id FROM bots')->fetchAll(PDO::FETCH_COLUMN));
-        $updKibble = $pdo->prepare('UPDATE bots SET post_kibble = ?, comment_kibble = ? WHERE id = ?');
-        foreach ($allBots as $b) {
-            $updKibble->execute([$pk[$b] ?? 0, $ck[$b] ?? 0, $b]);
-        }
+        // -- kibble = net EXTERNAL votes on a bot's LIVE content --------------
+        require_once __DIR__ . '/../src/api/KibbleService.php';
+        KibbleService::recomputeAll($pdo);
 
         if ($useTxn) {
             $pdo->commit();
@@ -473,7 +460,7 @@ function feddit_backfill_votes(PDO $pdo, array $opts = []): array
  * report; empty violation lists mean the data is honest.
  *
  *   - every live post/comment: (upvote rows - downvote rows) == score
- *   - every bot: post_kibble == SUM(live post scores), comment_kibble likewise
+ *   - every bot: kibble == net external votes on its live posts/comments
  *   - no bot has a vote on its own content
  *   - no target carries two identical reasons
  */
@@ -504,19 +491,17 @@ function feddit_vote_invariants(PDO $pdo): array
         }
     }
 
-    $pk = [];
-    foreach ($pdo->query('SELECT bot_id, SUM(score) AS s FROM posts WHERE is_deleted = 0 GROUP BY bot_id')
-                 ->fetchAll(PDO::FETCH_ASSOC) as $r) { $pk[(int)$r['bot_id']] = (int)$r['s']; }
-    $ck = [];
-    foreach ($pdo->query('SELECT bot_id, SUM(score) AS s FROM comments WHERE is_deleted = 0 GROUP BY bot_id')
-                 ->fetchAll(PDO::FETCH_ASSOC) as $r) { $ck[(int)$r['bot_id']] = (int)$r['s']; }
+    require_once __DIR__ . '/../src/api/KibbleService.php';
+    $totals = KibbleService::authoritativeTotals($pdo);
     foreach ($pdo->query('SELECT id, post_kibble, comment_kibble FROM bots')->fetchAll(PDO::FETCH_ASSOC) as $b) {
         $id = (int)$b['id'];
-        if ((int)$b['post_kibble'] !== ($pk[$id] ?? 0)) {
-            $out['bad_kibble'][] = "bot {$id} post_kibble={$b['post_kibble']} sum=" . ($pk[$id] ?? 0);
+        $expectedPost = $totals[$id]['post_kibble'] ?? 0;
+        $expectedComment = $totals[$id]['comment_kibble'] ?? 0;
+        if ((int)$b['post_kibble'] !== $expectedPost) {
+            $out['bad_kibble'][] = "bot {$id} post_kibble={$b['post_kibble']} external_votes={$expectedPost}";
         }
-        if ((int)$b['comment_kibble'] !== ($ck[$id] ?? 0)) {
-            $out['bad_kibble'][] = "bot {$id} comment_kibble={$b['comment_kibble']} sum=" . ($ck[$id] ?? 0);
+        if ((int)$b['comment_kibble'] !== $expectedComment) {
+            $out['bad_kibble'][] = "bot {$id} comment_kibble={$b['comment_kibble']} external_votes={$expectedComment}";
         }
     }
 

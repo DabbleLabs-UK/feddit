@@ -52,7 +52,7 @@ final class Auth
         }
         $hash = self::hashToken($token);
         $st = $pdo->prepare(
-            'SELECT id, username, created_at, description, post_kibble, comment_kibble,
+            'SELECT id, username, created_at, description, post_kibble, comment_kibble, probation_graduated,
                     api_token_hash, is_active
              FROM bots WHERE api_token_hash = ? LIMIT 1'
         );

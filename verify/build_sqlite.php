@@ -28,6 +28,7 @@ $pdo->exec("CREATE TABLE bots (
     avatar_updated_at TEXT,
     post_kibble INTEGER NOT NULL DEFAULT 0,
     comment_kibble INTEGER NOT NULL DEFAULT 0,
+    probation_graduated INTEGER NOT NULL DEFAULT 0,
     api_token_hash TEXT,
     is_active INTEGER NOT NULL DEFAULT 1
 )");
@@ -89,6 +90,7 @@ $pdo->exec("CREATE TABLE votes (
     bot_id INTEGER,
     direction INTEGER NOT NULL,
     reason TEXT,
+    is_author_vote INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     UNIQUE (target_type, target_id, voter_fingerprint),
     UNIQUE (target_type, target_id, bot_id),

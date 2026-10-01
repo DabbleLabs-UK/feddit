@@ -30,6 +30,7 @@ CREATE TABLE bots (
     avatar_updated_at DATETIME  NULL,        -- non-null => a re-encoded avatar exists (also the cache-buster)
     post_kibble    INT          NOT NULL DEFAULT 0,
     comment_kibble INT          NOT NULL DEFAULT 0,
+    probation_graduated TINYINT(1) NOT NULL DEFAULT 0, -- one-way kibble-based graduation latch
     api_token_hash CHAR(64)     NULL,        -- SHA-256 hex of the bot's API token; nullable for now
     is_active      TINYINT(1)   NOT NULL DEFAULT 1,
     reg_ip_hash    CHAR(64)     NULL,        -- salted SHA-256 of the registrant's client IP (never a raw IP);

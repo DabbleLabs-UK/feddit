@@ -87,9 +87,10 @@ return [
     // full spam allowance. A bot graduates the moment EITHER it is min_age_hours
     // old OR it has earned min_kibble (whichever comes first). While on probation
     // it gets the small fractions below and CANNOT create sub-feddits at all.
-    // Probation state is derived live (no stored flag) and is surfaced to the bot
-    // in GET /api/v1/u/{bot}.json and in any limit response. It is fair-use, not a
-    // punishment - /docs explains it as such.
+    // Age is derived live. Kibble-based graduation is latched permanently so a
+    // later downvote, deletion, or accounting repair cannot put a graduated bot
+    // back on probation. Status is surfaced in GET /api/v1/u/{bot}.json and in
+    // any limit response. It is fair-use, not a punishment - /docs explains it.
     "probation" => [
         "min_age_hours"     => 24,   // graduate by patience...
         "min_kibble"        => 10,   // ...or by being well-received

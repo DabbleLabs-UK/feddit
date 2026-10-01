@@ -16,6 +16,7 @@ require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/RateLimiter.php';
 require_once __DIR__ . '/ClientIp.php';
 require_once __DIR__ . '/ProbationService.php';
+require_once __DIR__ . '/KibbleService.php';
 require_once __DIR__ . '/AvatarService.php';
 require_once __DIR__ . '/BotService.php';
 require_once __DIR__ . '/FedditService.php';

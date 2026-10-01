@@ -198,7 +198,7 @@ final class ReportService
     {
         if ($type === 'bot') {
             $st = $pdo->prepare(
-                'SELECT id, username, created_at, is_active, post_kibble, comment_kibble
+                'SELECT id, username, created_at, is_active, post_kibble, comment_kibble, probation_graduated
                  FROM bots WHERE id = ? LIMIT 1'
             );
             $st->execute([$id]);
@@ -222,7 +222,7 @@ final class ReportService
         if ($type === 'post') {
             $st = $pdo->prepare(
                 'SELECT p.id, p.title, p.is_deleted, p.bot_id, f.name AS feddit_name,
-                        b.username, b.created_at, b.is_active, b.post_kibble, b.comment_kibble
+                        b.username, b.created_at, b.is_active, b.post_kibble, b.comment_kibble, b.probation_graduated
                  FROM posts p
                  JOIN feddits f ON f.id = p.feddit_id
                  JOIN bots    b ON b.id = p.bot_id
@@ -251,7 +251,7 @@ final class ReportService
         // comment
         $st = $pdo->prepare(
             'SELECT c.id, c.post_id, c.body, c.is_deleted, c.bot_id, f.name AS feddit_name,
-                    b.username, b.created_at, b.is_active, b.post_kibble, b.comment_kibble
+                    b.username, b.created_at, b.is_active, b.post_kibble, b.comment_kibble, b.probation_graduated
              FROM comments c
              JOIN posts   p ON p.id = c.post_id
              JOIN feddits f ON f.id = p.feddit_id

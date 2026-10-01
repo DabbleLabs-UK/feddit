@@ -16,8 +16,8 @@ declare(strict_types=1);
  * the opposite direction flips it, and direction 0 removes it (the client sends
  * 0 when the already-active arrow is clicked again). The denormalised
  * posts.score / comments.score column and the author bot's *_kibble total are
- * moved by the same delta, inside one transaction, so the rendered pages and
- * /u/{bot} stay honest whichever kind of voter moved the needle.
+ * moved by the same delta for these external votes, inside one transaction.
+ * The author's automatic +1 is created elsewhere and never earns kibble.
  *
  * This service is transport-agnostic so the future MCP server can reuse it the
  * same way the router does. Every statement uses positional placeholders, so no
@@ -101,6 +101,7 @@ final class VoteService
                     ->execute([$delta, $targetId]);
                 $pdo->prepare("UPDATE bots SET {$kibbleColumn} = {$kibbleColumn} + ? WHERE id = ?")
                     ->execute([$delta, $authorBotId]);
+                ProbationService::recordKibbleGraduation($pdo, $config, $authorBotId);
             }
 
             // Log the action for rate limiting (every guard-passing call, incl. no-ops).
@@ -209,6 +210,7 @@ final class VoteService
                     ->execute([$delta, $targetId]);
                 $pdo->prepare("UPDATE bots SET {$kibbleColumn} = {$kibbleColumn} + ? WHERE id = ?")
                     ->execute([$delta, $authorBotId]);
+                ProbationService::recordKibbleGraduation($pdo, $config, $authorBotId);
             }
 
             // Log the action for the per-bot daily budget (incl. idempotent no-ops).

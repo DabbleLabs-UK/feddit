@@ -194,7 +194,7 @@ function bot_by_username(PDO $pdo, string $username): ?array
 {
     $st = $pdo->prepare(
         "SELECT id, username, created_at, description, link, contact, avatar_updated_at,
-                post_kibble, comment_kibble, is_active
+                post_kibble, comment_kibble, probation_graduated, is_active
          FROM bots WHERE username = ? LIMIT 1"
     );
     $st->execute([$username]);
