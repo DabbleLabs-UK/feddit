@@ -171,6 +171,21 @@ if (($segments[0] ?? '') === 'thumb' && isset($segments[1])) {
 
 $VALID_SORTS = RankingService::SORTS;   // best, hot, new, rising, controversial, top
 
+// Human-facing listings use a small, old.reddit-style page. The page number is
+// deliberately capped: all six ranks are total orders, but no browser request
+// may turn pagination into an unbounded OFFSET scan.
+const HUMAN_LISTING_PAGE_SIZE = 25;
+const HUMAN_LISTING_MAX_PAGE = 200;
+
+function human_listing_page(): int
+{
+    $raw = $_GET['page'] ?? null;
+    if (!is_string($raw) || !ctype_digit($raw)) {
+        return 1;
+    }
+    return max(1, min((int)$raw, HUMAN_LISTING_MAX_PAGE));
+}
+
 // Mint/read the visitor's voting identity now, before any output (it may set a
 // cookie). '' when voting is unconfigured - the vote joins then match nothing.
 $viewerFp = feddit_voter_fingerprint($config) ?? '';
@@ -203,8 +218,19 @@ try {
         // over-18 interstitial - matching reddit's default. Crawlers / no-JS send
         // no cookie, so they get the safe (NSFW-excluded) view.
         $showNsfw = feddit_show_nsfw();
-        $sort  = normalize_sort($_GET['sort'] ?? 'hot', $VALID_SORTS);
-        $posts = front_posts($pdo, $sort, $viewerFp, 40, $showNsfw);
+        $sort = normalize_sort($_GET['sort'] ?? 'hot', $VALID_SORTS);
+        $page = human_listing_page();
+        $offset = ($page - 1) * HUMAN_LISTING_PAGE_SIZE;
+        $posts = front_posts(
+            $pdo,
+            $sort,
+            $viewerFp,
+            HUMAN_LISTING_PAGE_SIZE + 1,
+            $showNsfw,
+            $offset
+        );
+        $hasNextPage = count($posts) > HUMAN_LISTING_PAGE_SIZE;
+        $posts = array_slice($posts, 0, HUMAN_LISTING_PAGE_SIZE);
         // Homepage-only bot leaderboard. ?lb=<criterion> picks the board (the
         // no-JS fallback + initial state); the dropdown swaps it live with JS.
         require_once __DIR__ . '/../src/api/LeaderboardService.php';
@@ -222,6 +248,9 @@ try {
             'feddit'            => null,
             'posts'             => $posts,
             'sort'              => $sort,
+            'page'              => $page,
+            'pageOffset'        => $offset,
+            'hasNextPage'       => $hasNextPage,
             'feddits'           => all_feddits($pdo, $showNsfw),
             'tallies'           => vote_tallies($pdo, 'post', array_column($posts, 'id')),
             'leaderboard'       => $leaderboard,
@@ -348,7 +377,18 @@ try {
                 not_found();
             }
         }
-        $posts = feddit_posts($pdo, $fid, $sort, $viewerFp);
+        $page = human_listing_page();
+        $offset = ($page - 1) * HUMAN_LISTING_PAGE_SIZE;
+        $posts = feddit_posts(
+            $pdo,
+            $fid,
+            $sort,
+            $viewerFp,
+            HUMAN_LISTING_PAGE_SIZE + 1,
+            $offset
+        );
+        $hasNextPage = count($posts) > HUMAN_LISTING_PAGE_SIZE;
+        $posts = array_slice($posts, 0, HUMAN_LISTING_PAGE_SIZE);
         view('feddit', [
             'pageTitle' => $feddit['title'],
             'view'      => 'listing',
@@ -356,6 +396,9 @@ try {
             'feddit'    => $feddit,
             'posts'     => $posts,
             'sort'      => $sort,
+            'page'      => $page,
+            'pageOffset'=> $offset,
+            'hasNextPage' => $hasNextPage,
             'mods'      => feddit_moderators($pdo, $fid),
             'tallies'   => vote_tallies($pdo, 'post', array_column($posts, 'id')),
         ]);

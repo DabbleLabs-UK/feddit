@@ -80,8 +80,10 @@ function feddit_rules_list(PDO $pdo, int $fedditId): array
  * NSFW communities, so the server-rendered front page never leaks 18+ content to
  * a crawler or a visitor who has not passed the over-18 interstitial.
  */
-function front_posts(PDO $pdo, string $sort, string $fingerprint = '', int $limit = 40, bool $includeNsfw = false): array
+function front_posts(PDO $pdo, string $sort, string $fingerprint = '', int $limit = 40, bool $includeNsfw = false, int $offset = 0): array
 {
+    $limit = max(1, min($limit, 100));
+    $offset = max(0, $offset);
     $rank = RankingService::clause($sort);
     $nsfw = $includeNsfw ? '' : ' AND f.is_nsfw = 0';
     $sql = "SELECT " . POST_SELECT . "
@@ -91,20 +93,23 @@ function front_posts(PDO $pdo, string $sort, string $fingerprint = '', int $limi
             " . POST_VOTE_JOIN . "
             WHERE p.is_deleted = 0" . $nsfw . $rank['where'] . "
             ORDER BY " . $rank['order'] . "
-            LIMIT :lim";
+            LIMIT :lim OFFSET :off";
     $st = $pdo->prepare($sql);
     $st->bindValue(':fp', $fingerprint);
     foreach ($rank['binds'] as $k => $v) {
         $st->bindValue($k, $v);
     }
     $st->bindValue(':lim', $limit, PDO::PARAM_INT);
+    $st->bindValue(':off', $offset, PDO::PARAM_INT);
     $st->execute();
     return $st->fetchAll();
 }
 
 /** Listing for a single feddit. Ordered entirely in SQL. */
-function feddit_posts(PDO $pdo, int $fedditId, string $sort, string $fingerprint = '', int $limit = 40): array
+function feddit_posts(PDO $pdo, int $fedditId, string $sort, string $fingerprint = '', int $limit = 40, int $offset = 0): array
 {
+    $limit = max(1, min($limit, 100));
+    $offset = max(0, $offset);
     $rank = RankingService::clause($sort);
     $sql = "SELECT " . POST_SELECT . "
             FROM posts p
@@ -113,7 +118,7 @@ function feddit_posts(PDO $pdo, int $fedditId, string $sort, string $fingerprint
             " . POST_VOTE_JOIN . "
             WHERE p.feddit_id = :fid AND p.is_deleted = 0" . $rank['where'] . "
             ORDER BY " . $rank['order'] . "
-            LIMIT :lim";
+            LIMIT :lim OFFSET :off";
     $st = $pdo->prepare($sql);
     $st->bindValue(':fp', $fingerprint);
     $st->bindValue(':fid', $fedditId, PDO::PARAM_INT);
@@ -121,6 +126,7 @@ function feddit_posts(PDO $pdo, int $fedditId, string $sort, string $fingerprint
         $st->bindValue($k, $v);
     }
     $st->bindValue(':lim', $limit, PDO::PARAM_INT);
+    $st->bindValue(':off', $offset, PDO::PARAM_INT);
     $st->execute();
     return $st->fetchAll();
 }

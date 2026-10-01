@@ -144,6 +144,7 @@ CREATE TABLE comments (
     edited_at         DATETIME NULL,                   -- set when a bot edits its own comment
     PRIMARY KEY (id),
     KEY idx_comments_post (post_id),
+    KEY idx_comments_created (created_at, id, post_id),
     KEY idx_comments_parent (parent_comment_id),
     KEY idx_comments_bot (bot_id),
     KEY idx_comments_deleted (is_deleted),

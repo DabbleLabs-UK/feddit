@@ -702,6 +702,59 @@ try {
     $rFrontBest = http('GET', '/api/v1/front/best.json');
     check($rFrontBest['status'] === 200 && ($rFrontBest['json']['kind'] ?? '') === 'Listing', 'front/best.json is a Listing');
 
+    echo "== human listing pagination ==\n";
+    $pageDb = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $sorterId = (int)$pageDb->query("SELECT id FROM bots WHERE username='sorter_bot'")->fetchColumn();
+    $pageDb->exec("INSERT INTO feddits (name,title,description,sidebar_text,is_nsfw,post_format,created_by_bot_id,subscriber_count,created_at)
+        VALUES ('pagetown','Page Town','Pagination fixtures','Pagination fixtures',0,'any',{$sorterId},0,CURRENT_TIMESTAMP)");
+    $pageFedditId = (int)$pageDb->lastInsertId();
+    $insertPagePost = $pageDb->prepare(
+        "INSERT INTO posts (feddit_id,bot_id,title,kind,body,url,created_at,score,comment_count,is_nsfw,is_deleted)
+         VALUES (?,?,?,'text','body',NULL,?,?,0,0,0)"
+    );
+    $insertPageVote = $pageDb->prepare(
+        "INSERT INTO votes (target_type,target_id,voter_fingerprint,bot_id,direction,reason,is_author_vote,created_at)
+         VALUES ('post',?,?,NULL,-1,NULL,0,CURRENT_TIMESTAMP)"
+    );
+    for ($i = 1; $i <= 58; $i++) {
+        $insertPagePost->execute([
+            $pageFedditId, $sorterId, 'page item ' . $i,
+            date('Y-m-d H:i:s', time() - $i * 60), 100 + ($i % 9),
+        ]);
+        $insertPageVote->execute([(int)$pageDb->lastInsertId(), hash('sha256', 'page-voter-' . $i)]);
+    }
+    $pageIds = static function (string $html): array {
+        preg_match_all('#/f/pagetown/comments/(\d+)/#', $html, $matches);
+        return array_values(array_unique(array_map('intval', $matches[1] ?? [])));
+    };
+    $htmlPage1 = http('GET', '/f/pagetown/new');
+    $htmlPage2 = http('GET', '/f/pagetown/new?page=2');
+    $htmlPage3 = http('GET', '/f/pagetown/new?page=3');
+    $idsPage1 = $pageIds($htmlPage1['raw']);
+    $idsPage2 = $pageIds($htmlPage2['raw']);
+    $idsPage3 = $pageIds($htmlPage3['raw']);
+    check(count($idsPage1) === 25 && count($idsPage2) === 25 && count($idsPage3) === 8,
+        'community listing exposes 25-item pages and a shorter final page');
+    check(count(array_intersect($idsPage1, $idsPage2)) === 0 && count(array_intersect($idsPage2, $idsPage3)) === 0,
+        'adjacent unchanged pages contain no duplicate posts');
+    check(str_contains($htmlPage1['raw'], '/f/pagetown/new?page=2') &&
+          str_contains($htmlPage2['raw'], '/f/pagetown/new?page=1') === false &&
+          str_contains($htmlPage2['raw'], '/f/pagetown/new') &&
+          str_contains($htmlPage2['raw'], '/f/pagetown/new?page=3'),
+        'previous/next links retain community and sort context');
+    check(!str_contains($htmlPage3['raw'], '/f/pagetown/new?page=4'),
+        'final community page has no false next link');
+    foreach (['best','hot','new','rising','controversial','top'] as $htmlSort) {
+        $sortedPage = http('GET', '/f/pagetown/' . $htmlSort . '?page=2');
+        check($sortedPage['status'] === 200 && str_contains($sortedPage['raw'], '/f/pagetown/' . $htmlSort),
+            'human ' . $htmlSort . ' route accepts a later page without losing sort context');
+    }
+    $frontFirst = http('GET', '/?sort=new');
+    $frontSecond = http('GET', '/?sort=new&page=2');
+    $frontIds1 = $pageIds($frontFirst['raw']);
+    $frontIds2 = $pageIds($frontSecond['raw']);
+    check(str_contains($frontFirst['raw'], '/?sort=new&amp;page=2') && count(array_intersect($frontIds1, $frontIds2)) === 0,
+        'front-page next link retains sort and adjacent unchanged pages do not repeat Page Town posts');
     echo "== conversations (pruning rule) ==\n";
     // Three fresh bots: the subject whose conversations we read, and two others
     // to build branches it never touches.
@@ -822,6 +875,40 @@ try {
     $laterIds = array_column($attLater['json']['events'] ?? [], 'event_id');
     check(in_array('t1_' . $later, $laterIds, true) && count($laterIds) === 1,
         'cursor returns a later event once without replaying old ones');
+
+    echo "== recently active threads ==\n";
+    $unauthActive = http('GET', '/api/v1/active-threads.json?communities=bottown');
+    check($unauthActive['status'] === 401, 'recently active threads require the bot bearer token');
+    $activeDb = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $activeDb->prepare("UPDATE posts SET created_at = ? WHERE id = ?")
+        ->execute([date('Y-m-d H:i:s', time() - 10 * 86400), $P]);
+    $active = http('GET', '/api/v1/active-threads.json?communities=bottown&limit=10', ['bearer' => $subj]);
+    check($active['status'] === 200 && ($active['json']['source'] ?? '') === 'recent_comment_activity',
+        'recently active endpoint returns its distinct source metadata');
+    $activeThreads = $active['json']['threads'] ?? [];
+    check(count($activeThreads) <= 10 && count($activeThreads) > 0,
+        'recently active shortlist is non-empty and bounded');
+    $oldRenewed = null;
+    foreach ($activeThreads as $thread) {
+        if ((int)($thread['post']['id'] ?? 0) === $P) { $oldRenewed = $thread; break; }
+    }
+    check($oldRenewed !== null && (int)($oldRenewed['fresh_comment']['id'] ?? 0) === $later,
+        'an old post resurfaces through its genuinely fresh newest comment');
+    check(isset($oldRenewed['post']['title'], $oldRenewed['fresh_comment']['body']) &&
+          array_key_exists('parent_comment', $oldRenewed),
+        'renewed thread carries bounded post, fresh comment and nearby parent context');
+    $activeAgain = http('GET', '/api/v1/active-threads.json?communities=bottown&limit=10', ['bearer' => $subj]);
+    check(($activeAgain['json']['threads'][0]['event_id'] ?? '') === ($activeThreads[0]['event_id'] ?? ''),
+        'unchanged activity has a stable event id for runner-side exact dedupe');
+    $renewedAgainId = $cmt($o1, $P, $later, 'a newer comment renews the old thread again');
+    $activeRenewed = http('GET', '/api/v1/active-threads.json?communities=bottown&limit=10', ['bearer' => $subj]);
+    $renewedPost = null;
+    foreach (($activeRenewed['json']['threads'] ?? []) as $thread) {
+        if ((int)($thread['post']['id'] ?? 0) === $P) { $renewedPost = $thread; break; }
+    }
+    check((int)($renewedPost['fresh_comment']['id'] ?? 0) === $renewedAgainId &&
+          ($renewedPost['event_id'] ?? '') !== ($oldRenewed['event_id'] ?? ''),
+        'a later comment renews the same thread with a new dedupe event');
 
     $conv = http('GET', '/api/v1/u/convo_bot/conversations.json');
     check($conv['status'] === 200, 'conversations.json -> 200');

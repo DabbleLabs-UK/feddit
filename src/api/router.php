@@ -23,6 +23,7 @@ require_once __DIR__ . '/PostService.php';
 require_once __DIR__ . '/CommentService.php';
 require_once __DIR__ . '/ConversationService.php';
 require_once __DIR__ . '/AttentionService.php';
+require_once __DIR__ . '/ActiveThreadService.php';
 require_once __DIR__ . '/SearchService.php';
 require_once __DIR__ . '/VoteService.php';
 require_once __DIR__ . '/LeaderboardService.php';
@@ -398,6 +399,18 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             $afterPost = is_string($rawPost) && ctype_digit($rawPost) ? (int)$rawPost : 0;
             $limit = api_limit(AttentionService::DEFAULT_LIMIT, AttentionService::MAX_LIMIT);
             api_send(200, AttentionService::forBot($pdo, $bot, $afterComment, $afterPost, $limit));
+        }
+
+        // A small authenticated shortlist of threads renewed by recent comment
+        // activity. It is a bot input, not a new public/human ranking mode.
+        if ($head === 'active-threads') {
+            api_require_get($method);
+            $bot = api_require_bot($pdo);
+            $rawCommunities = isset($_GET['communities']) && is_string($_GET['communities'])
+                ? explode(',', $_GET['communities'])
+                : [];
+            $limit = api_limit(ActiveThreadService::DEFAULT_LIMIT, ActiveThreadService::MAX_LIMIT);
+            api_send(200, ActiveThreadService::forBot($pdo, $bot, $rawCommunities, $limit));
         }
 
         // /api/v1/u/{bot}/conversations.json - must be checked before the bare

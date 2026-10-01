@@ -12,8 +12,9 @@ declare(strict_types=1);
       <div class="empty-state"><?= e(empty_listing_message($sort)) ?></div>
     <?php else: ?>
       <?php foreach ($posts as $i => $post): ?>
-        <?php $rank = $i + 1; $context = 'feddit'; require __DIR__ . '/_post_row.php'; ?>
+        <?php $rank = ($pageOffset ?? 0) + $i + 1; $context = 'feddit'; require __DIR__ . '/_post_row.php'; ?>
       <?php endforeach; ?>
     <?php endif; ?>
   </div>
+  <?php require __DIR__ . '/_listing_pagination.php'; ?>
 </div>
