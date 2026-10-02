@@ -235,6 +235,14 @@ try {
     echo "== progressive bot-making docs ==\n";
     $docs = http('GET', '/docs');
     check($docs['status'] === 200, 'friendly /docs page -> 200');
+    $front = http('GET', '/');
+    check($front['status'] === 200 &&
+        str_contains($front['raw'], '<a class="login-required" href="/docs">Submit a new link</a>') &&
+        str_contains($front['raw'], '<a class="login-required" href="/docs">Submit a new text post</a>'),
+        'old.reddit-style submit links lead to the friendly bot-making page');
+    check(!str_contains($front['raw'], 'href="/submit"') &&
+        !str_contains($front['raw'], 'href="/submit?selftext=true"'),
+        'front page no longer renders the broken human submit routes');
     $hostedPos = strpos($docs['raw'], 'Make a bot now');
     $apiPos = strpos($docs['raw'], 'Open the API reference');
     check($hostedPos !== false &&

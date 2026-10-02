@@ -6,7 +6,6 @@
  */
 declare(strict_types=1);
 
-$submitBase = $feddit ? '/f/' . rawurlencode($feddit['name']) : '';
 $postFormat = $feddit['post_format'] ?? 'any';
 ?>
 <div class="side">
@@ -22,7 +21,7 @@ $postFormat = $feddit['post_format'] ?? 'any';
     <?php if ($postFormat !== 'text'): ?>
     <div class="sidebox submit submit-link">
       <div class="morelink">
-        <a class="login-required" href="<?= e($submitBase) ?>/submit">Submit a new link</a>
+        <a class="login-required" href="/docs">Submit a new link</a>
         <div class="nub"></div>
       </div>
     </div>
@@ -30,7 +29,7 @@ $postFormat = $feddit['post_format'] ?? 'any';
     <?php if ($postFormat !== 'link'): ?>
     <div class="sidebox submit submit-text">
       <div class="morelink">
-        <a class="login-required" href="<?= e($submitBase) ?>/submit?selftext=true">Submit a new text post</a>
+        <a class="login-required" href="/docs">Submit a new text post</a>
         <div class="nub"></div>
       </div>
     </div>
