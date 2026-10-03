@@ -88,10 +88,11 @@ $cfg = "<?php\nreturn [\n"
      . "    'admin_key' => 'test-admin-key',\n"
      . "    'vote_secret' => 'test-vote-secret-abc123',\n"
      . "    'rate_limits' => ['posts_per_hour' => 5, 'comments_per_hour' => 60, 'feddits_per_day' => 1, 'votes_per_hour' => 10, 'bot_votes_per_day' => 6, 'reports_per_hour' => 4],\n"
-     // Registration cap is low + trippable. Trust 127.0.0.0/8 as a proxy so the
-     // harness can simulate distinct client IPs via CF-Connecting-IP; suite calls
-     // that send no such header resolve to null (unattributable, not throttled).
-     . "    'registration' => ['per_hour' => 4, 'per_day' => 8, 'ip_salt' => 'test-ip-salt'],\n"
+     // Use the production registration default. Keep a deliberately tiny legacy
+     // per_hour value to prove that obsolete key no longer imposes a throttle.
+     // Trust 127.0.0.0/8 as a proxy so the harness can simulate distinct client
+     // IPs via CF-Connecting-IP; requests without that header resolve to null.
+     . "    'registration' => ['per_hour' => 1, 'per_day' => 50, 'ip_salt' => 'test-ip-salt'],\n"
      . "    'cloudflare' => ['trusted_ranges' => ['127.0.0.0/8', '::1/128']],\n"
      // Tight probation limits; graduate by 24h OR 5 kibble.
      . "    'probation' => ['min_age_hours' => 24, 'min_kibble' => 5, 'posts_per_hour' => 2, 'comments_per_hour' => 3, 'votes_per_day' => 2],\n"
@@ -1420,25 +1421,37 @@ try {
         return http('POST', '/api/v1/register', ['json' => ['username' => $u], 'headers' => ['CF-Connecting-IP: ' . $ip]]);
     };
     $SIP = '203.0.113.77';
-    $tripped = false; $last = null; $made = 0;
-    for ($i = 1; $i <= 6; $i++) {
-        $last = $regIp("regflood_{$i}", $SIP);
-        if ($last['status'] === 201) { $made++; }
-        if ($last['status'] === 429) { $tripped = true; break; }
+    $made = 0;
+    for ($i = 1; $i <= 50; $i++) {
+        $r = $regIp("regdaily_{$i}", $SIP);
+        if ($r['status'] === 201) { $made++; }
+        if ($i === 1) {
+            $duplicate = $regIp('regdaily_1', $SIP);
+            check($duplicate['status'] === 409, 'duplicate username is rejected without creating another account');
+        }
+        if ($i === 6) {
+            check($made === 6, 'more than five registrations inside one hour succeed (no hourly throttle)');
+        }
     }
-    check($tripped, 'registering past the per-IP hourly cap -> 429');
-    check($made === 4, 'exactly per_hour (4) accounts allowed from one IP before the cap');
+    check($made === 50, 'the first 50 registrations from one network are accepted');
+    $last = $regIp('regdaily_51', $SIP);
+    check($last['status'] === 429, 'the 51st registration inside rolling 24 hours is rejected');
     check(($last['json']['error']['code'] ?? '') === 'rate_limited', 'registration limit error envelope');
-    check(str_contains(strtolower($last['json']['error']['message'] ?? ''), 'registration limit'), '429 names the registration limit + reset');
+    $limitMessage = strtolower($last['json']['error']['message'] ?? '');
+    check(str_contains($limitMessage, '50 new bot registrations per day from your network'), '429 names the 50-per-day network limit');
+    check(str_contains($limitMessage, 'try again in') && str_contains($limitMessage, 'utc'), '429 includes remaining wait and UTC reset time');
 
-    // Reset: age this IP's registrations out of the window -> it can register again.
-    // Only the regflood bots carry a non-null hash at this point, so this is scoped.
+    $otherNetwork = $regIp('regdaily_other', '203.0.113.78');
+    check($otherNetwork['status'] === 201, 'a capped network does not consume another network allowance');
+
+    // Reset: age this IP's registrations out of rolling 24 hours -> it can register again.
+    // Only this registration-limit fixture has non-null hashes so far, so this is scoped.
     $ag = new PDO('sqlite:' . $DBFILE, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     $ag->prepare('UPDATE bots SET created_at = ? WHERE reg_ip_hash IS NOT NULL')
        ->execute([date('Y-m-d H:i:s', time() - 2 * 86400)]);
     $ag = null;
-    $r = $regIp('regflood_after_reset', $SIP);
-    check($r['status'] === 201, 'once the window ages out, the same IP can register again (limit resets)');
+    $r = $regIp('regdaily_after_reset', $SIP);
+    check($r['status'] === 201, 'once rolling 24 hours age out, the same network allowance resets');
 
     echo "== admin purge: same-IP sibling cluster ==\n";
     // Two bots from ONE simulated IP + one from another. (Admin cookie authorised

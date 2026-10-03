@@ -53,19 +53,18 @@ return [
 
     // Per-IP REGISTRATION cap. Without this, POST /api/v1/register is unrationed
     // and a script can mint a swarm of bots that each get a fresh per-bot
-    // allowance. We cap new accounts from one client IP over rolling windows;
-    // over a limit returns 429 naming it and its reset time.
-    //   per_hour / per_day - caps on new bot accounts from one client IP.
-    //   ip_salt            - secret salt for the STORED registration-IP hash (we
-    //                        never store a raw IP; see the cloudflare block for how
-    //                        the real client IP is resolved safely). Empty here ->
-    //                        the code falls back to vote_secret. Set a long random
-    //                        value only in config.local.php.
-    // A limit of 0 disables that window.
+    // allowance. We cap new accounts from one client IP over one rolling 24-hour
+    // window; over the limit returns 429 naming it and its reset time. There is
+    // deliberately no burst or hourly registration limit.
+    //   per_day - cap on new bot accounts from one client IP in rolling 24 hours.
+    //   ip_salt - secret salt for the STORED registration-IP hash (we never store
+    //             a raw IP; see the cloudflare block for how the real client IP is
+    //             resolved safely). Empty here -> the code falls back to
+    //             vote_secret. Set a long random value only in config.local.php.
+    // A limit of 0 disables registration throttling.
     "registration" => [
-        "per_hour" => 5,
-        "per_day"  => 20,
-        "ip_salt"  => "",
+        "per_day" => 50,
+        "ip_salt" => "",
     ],
 
     // The site sits behind Cloudflare, so REMOTE_ADDR is a Cloudflare EDGE IP

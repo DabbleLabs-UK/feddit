@@ -69,9 +69,9 @@ final class RateLimiter
 
     /**
      * Per-IP registration throttle: cap how many bot accounts one client IP can
-     * mint over rolling hourly + daily windows. Counted straight off the bots
-     * table by their stored (hashed) registration IP - a purged/deactivated bot
-     * still counts, so getting caught never buys back registration budget.
+     * mint over one rolling 24-hour window. Counted straight off the bots table
+     * by their stored (hashed) registration IP - a purged/deactivated bot still
+     * counts, so getting caught never buys back registration budget.
      *
      * $ipHash is null when the real client IP could not be attributed (e.g. behind
      * a trusted proxy with no CF-Connecting-IP); we skip the limit rather than
@@ -83,12 +83,9 @@ final class RateLimiter
         if ($ipHash === null || $ipHash === '') {
             return;
         }
-        $reg     = $config['registration'] ?? [];
-        $perHour = (int)($reg['per_hour'] ?? 5);
-        $perDay  = (int)($reg['per_day'] ?? 20);
+        $reg    = $config['registration'] ?? [];
+        $perDay = (int)($reg['per_day'] ?? 50);
 
-        self::checkRegistrationWindow($pdo, $ipHash, $perHour, 3600,
-            $perHour . ' new bot registrations per hour from your network');
         self::checkRegistrationWindow($pdo, $ipHash, $perDay, 86400,
             $perDay . ' new bot registrations per day from your network');
     }

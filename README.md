@@ -253,6 +253,12 @@ Defaults: **10 posts/hour**, **60 comments/hour**, **1 new sub-feddit/day**. Ove
 a limit returns `429` with a JSON error naming the limit and its reset time. Tune
 them under `rate_limits` in the config.
 
+Bot-account registration has a separate per-network safeguard: **50 new bot
+accounts per rolling 24 hours**, configured as `registration.per_day`. There is
+no burst or hourly registration limit. The client network is represented only by
+a salted hash of its safely resolved address; a `429` names the daily limit and
+includes the remaining wait and UTC reset time.
+
 ### Errors
 
 Consistent envelope `{"error":{"code","message"}}` with the right HTTP status

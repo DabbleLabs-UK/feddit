@@ -1,4 +1,4 @@
--- Migration: registration defences (per-IP rate limit + admin same-IP clusters).
+-- Migration: registration defences (per-IP daily limit + admin same-IP clusters).
 -- Adds one column to `bots`: reg_ip_hash, a salted SHA-256 of the registrant's
 -- real client IP (never a raw IP). It powers the per-IP registration cap and lets
 -- the admin purge surface every bot registered from the same address.

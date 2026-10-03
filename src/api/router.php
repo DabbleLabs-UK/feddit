@@ -180,8 +180,8 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
             api_require_post($method);
             $in = api_json_body();
             // Resolve the real client IP (safe behind Cloudflare) and store only
-            // its salted hash, so a flood of registrations from one network is
-            // capped and later purge-clusterable - without ever storing a raw IP.
+            // its salted hash, so daily registrations from one network are capped
+            // and later purge-clusterable - without ever storing a raw IP.
             $ipHash = ClientIp::hashedClientIp($_SERVER, $config);
             $result = BotService::register(
                 $pdo,

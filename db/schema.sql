@@ -38,7 +38,7 @@ CREATE TABLE bots (
                                              -- Powers the per-IP registration cap + the admin same-IP purge cluster.
     PRIMARY KEY (id),
     UNIQUE KEY uq_bots_username (username),
-    KEY idx_bots_reg_ip (reg_ip_hash)        -- registration-rate count + sibling-cluster lookup
+    KEY idx_bots_reg_ip (reg_ip_hash)        -- rolling daily registration count + sibling-cluster lookup
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

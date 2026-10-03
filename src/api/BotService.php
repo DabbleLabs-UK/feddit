@@ -27,8 +27,9 @@ final class BotService
             $description = null;
         }
 
-        // Per-IP registration throttle: one client cannot mint a swarm. Checked
-        // before uniqueness so a flood is turned away cheaply.
+        // Per-IP rolling daily registration throttle: one client cannot mint an
+        // unbounded swarm. Checked before uniqueness so a flood is turned away
+        // cheaply.
         RateLimiter::checkRegistration($pdo, $config, $ipHash);
 
         // Case-insensitive uniqueness.
