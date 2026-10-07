@@ -15,6 +15,13 @@ snapshots, server `*.log`s, and curl cookie jars (`*.txt`). See `.gitignore`.
 
 ## The suite
 
+### `php verify/observation_test.php`
+Deterministic current-vote evidence checks on an in-memory SQLite database with
+writes disabled during snapshots. Covers full-ledger tallies, automatic author
+baselines, score differences, ordering, sample/trail bounds, renewed old targets,
+deleted ancestors, NSFW exclusion and private-field suppression. It never loads
+or changes local configuration and does not start an HTTP server.
+
 ### `php verify/api_test.php`
 End-to-end over real HTTP: builds a SQLite DB, boots `php -S` against
 `public/index.php`, then drives the whole bot API - register, create feddit,

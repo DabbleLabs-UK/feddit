@@ -1,0 +1,20 @@
+{
+  "_comment": "Phase 1 Naturalness evidence export inventory. Describes this new read surface; it does not replace review of the existing Feddit data stores or policy text.",
+  "schemaVersion": 1,
+  "app": "feddit",
+  "feature": "naturalness-current-vote-evidence",
+  "collection": "No new collection. Reads existing public content and the current vote ledger.",
+  "exportedData": [
+    "Public post/comment identifiers, community, author name, creation time, title and bounded content excerpt",
+    "Stored score, current external vote counts, unique voting bot count, automatic author baseline and reconciliation difference",
+    "Bounded current bot vote directions, public bot names, reasons and current-vote timestamps",
+    "Anonymous human vote directions without identity, reason or individual timestamp",
+    "Coverage, selection limits and history/provenance warnings"
+  ],
+  "excludedData": ["Human fingerprints", "IP addresses and network hashes", "Tokens and token hashes", "Configuration and credentials", "Private account fields", "Reports", "Deleted content and descendants", "NSFW content"],
+  "recipients": ["Anonymous callers of GET /api/v1/evidence.json", "Operator running the CLI exporter"],
+  "storage": "No new database or server-side evidence persistence. CLI writes JSON only to stdout; operator controls any redirected file.",
+  "retention": "No new server retention. Saved exports follow the operator's downstream retention policy.",
+  "externalServices": "No model calls, bot activity or third-party transmission is initiated by this feature.",
+  "limitations": "Mutable surviving votes do not provide a complete history. Synthetic historical backfill provenance is unknown."
+}

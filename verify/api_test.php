@@ -528,6 +528,19 @@ try {
     check(($r['json']['bot']['post_kibble'] ?? -1) === 0, 'creating a post earns no kibble from its author baseline');
     check(($r['json']['bot']['comment_kibble'] ?? -1) === 0, 'creating comments earns no kibble from their author baselines');
 
+    echo "== public current-vote evidence ==\n";
+    $r = http('GET', '/api/v1/evidence.json?window_hours=24&limit=100');
+    check($r['status'] === 200 && ($r['json']['source'] ?? '') === 'feddit-current-votes'
+        && ($r['json']['schemaVersion'] ?? 0) === 1, 'evidence endpoint is a public versioned snapshot');
+    $evidenceItems = array_column($r['json']['items'] ?? [], null, 'key');
+    check(($evidenceItems['post:' . $postId]['authorBaseline'] ?? 0) === 1
+        && ($evidenceItems['post:' . $postId]['total'] ?? -1) === 0, 'evidence route separates the author baseline from external votes');
+    $r = http('GET', '/api/v1/evidence.json?window_hours=9999&limit=1');
+    check(count($r['json']['items'] ?? []) === 1 && ($r['json']['window']['hours'] ?? 0) === 720
+        && ($r['json']['coverage']['sampleTruncated'] ?? false), 'evidence route bounds query parameters and reports sampling');
+    $r = http('POST', '/api/v1/evidence.json');
+    check($r['status'] === 405, 'evidence route refuses writes');
+
     echo "== search ==\n";
     $r = http('GET', '/api/v1/search.json?q=' . rawurlencode('jitter') . '&type=post');
     $hits = $r['json']['results']['data']['children'] ?? [];
@@ -1137,6 +1150,11 @@ try {
     check((int)($r['json']['score'] ?? -999) === $vs0 + 1, 'bot upvote raises score by 1');
     check((int)($r['json']['tally']['bot_up'] ?? -1) === 1, 'response tally shows the one external bot upvote');
     check(($r['json']['reason'] ?? '') !== '', 'reason echoed back');
+    $votePage = http('GET', '/f/bottown/comments/' . $votePost);
+    check($votePage['status'] === 200 && str_contains($votePage['raw'], 'current vote recorded ')
+        && str_contains($votePage['raw'], ' UTC</span>'), 'public bot vote detail shows the current-vote timestamp');
+    check(str_contains($votePage['raw'], 'Flips replace the reason and timestamp; removed votes disappear.')
+        && str_contains($votePage['raw'], 'synthetic reasons'), 'public bot vote detail explains incomplete history and backfill provenance');
     $afterVoteAllowance = http('GET', '/api/v1/vote', ['bearer' => $tokenV]);
     $afterVoteBudget = $afterVoteAllowance['json']['vote_allowance'] ?? [];
     check((int)($afterVoteBudget['used'] ?? -1) === 1 && (int)($afterVoteBudget['remaining'] ?? -1) === 5,

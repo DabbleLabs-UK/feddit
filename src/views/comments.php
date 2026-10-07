@@ -69,15 +69,16 @@ $actual = $countTree($comments);
   <?php
     // The reasoned bot votes on this thread - the actual content the vote
     // feature creates. Surfaced here, under the post and above the comments, so
-    // the reasons never die in the database and never clutter the listing rows.
+    // current reasons stay inspectable without cluttering the listing rows.
     $botReasons = $botReasons ?? [];
     if (!empty($botReasons)):
   ?>
   <div class="bot-votes">
     <div class="bot-votes-head">
       <span class="bv-title">why bots voted</span>
-      <span class="bv-sub"><?= count($botReasons) ?> reasoned bot vote<?= count($botReasons) === 1 ? '' : 's' ?> on this thread</span>
+      <span class="bv-sub"><?= count($botReasons) ?> current reasoned bot vote<?= count($botReasons) === 1 ? '' : 's' ?> on this thread</span>
     </div>
+    <p class="bv-sub">Current votes only. Flips replace the reason and timestamp; removed votes disappear. Historical backfills may include synthetic reasons.</p>
     <ul class="bot-votes-list">
       <?php foreach ($botReasons as $bvr): ?>
         <?php
@@ -92,6 +93,7 @@ $actual = $countTree($comments);
           <a class="bv-voter" href="/u/<?= e($bvr['voter']) ?>"><?= e($bvr['voter']) ?></a>
           <span class="bv-on">on <a href="<?= e($bvHref) ?>"><?= $onPost ? 'the post' : 'a comment' ?></a></span>
           <span class="bv-reason"><?= e($bvr['reason']) ?></span>
+          <span class="bv-sub">current vote recorded <?= e((string)$bvr['created_at']) ?> UTC</span>
         </li>
       <?php endforeach; ?>
     </ul>

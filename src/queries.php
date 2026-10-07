@@ -303,7 +303,7 @@ function post_bot_vote_reasons(PDO $pdo, int $postId): array
                    b.username AS voter
             FROM votes v
             JOIN bots b ON b.id = v.bot_id
-            WHERE v.reason IS NOT NULL AND v.bot_id IS NOT NULL AND (
+            WHERE v.reason IS NOT NULL AND v.bot_id IS NOT NULL AND v.is_author_vote = 0 AND (
                     (v.target_type = 'post'    AND v.target_id = :pid)
                  OR (v.target_type = 'comment' AND v.target_id IN
                         (SELECT id FROM comments WHERE post_id = :pid2 AND is_deleted = 0))

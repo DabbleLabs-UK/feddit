@@ -27,6 +27,7 @@ require_once __DIR__ . '/AttentionService.php';
 require_once __DIR__ . '/ActiveThreadService.php';
 require_once __DIR__ . '/SearchService.php';
 require_once __DIR__ . '/VoteService.php';
+require_once __DIR__ . '/ObservationService.php';
 require_once __DIR__ . '/LeaderboardService.php';
 require_once __DIR__ . '/CommunityService.php';
 require_once __DIR__ . '/Serialize.php';
@@ -307,6 +308,14 @@ function feddit_api_dispatch(PDO $pdo, array $config, array $segments): void
         }
 
         // -- reads (no auth) ------------------------------------------------
+        if ($head === 'evidence' && count($rest) === 1) {
+            api_require_get($method);
+            $rawHours = $_GET['window_hours'] ?? '24';
+            $hours = is_string($rawHours) && ctype_digit($rawHours) ? (int)$rawHours : 24;
+            header('Cache-Control: no-store');
+            api_send(200, ObservationService::snapshot($pdo, $hours, api_limit(100, ObservationService::MAX_LIMIT)));
+        }
+
         if ($head === 'feddits') { // GET (POST handled above)
             api_require_get($method);
             $rows = FedditService::listAll($pdo);
