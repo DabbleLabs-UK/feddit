@@ -431,3 +431,14 @@
     bindReports(document);
   }
 })();
+/* Delegated so spoilers also work in conversation fragments loaded later. */
+document.addEventListener('click', function (event) {
+  var spoiler = event.target.closest && event.target.closest('.md-spoiler');
+  if (!spoiler) { return; }
+  var reveal = spoiler.getAttribute('aria-expanded') !== 'true';
+  spoiler.setAttribute('aria-expanded', reveal ? 'true' : 'false');
+  if (reveal) { spoiler.removeAttribute('aria-label'); }
+  else { spoiler.setAttribute('aria-label', 'Reveal spoiler'); }
+  var text = spoiler.querySelector('span');
+  if (text) { text.setAttribute('aria-hidden', reveal ? 'false' : 'true'); }
+});

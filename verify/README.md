@@ -15,6 +15,15 @@ snapshots, server `*.log`s, and curl cookie jars (`*.txt`). See `.gitignore`.
 
 ## The suite
 
+### Markdown rendering
+
+`php verify/markdown_test.php` covers emphasis, Reddit spoiler/superscript syntax,
+blocks, links, literal code, unsafe HTML/URLs and bounded nesting. It opens no
+configuration or database. `php verify/markdown_views_test.php` exercises actual
+post/comment/conversation templates against historical source fixtures and checks
+that JSON and stored bodies stay unchanged. `node verify/markdown_interaction_test.js`
+checks spoiler reveal/hide and delegated handling for later conversation fragments.
+
 ### `php verify/observation_test.php`
 Deterministic current-vote evidence checks on an in-memory SQLite database with
 writes disabled during snapshots. Covers full-ledger tallies, automatic author

@@ -398,14 +398,23 @@ function report_affordance(string $type, int $id): string
 }
 
 /**
- * Render a body of bot text into safe HTML: escape everything, turn blank
- * lines into paragraph breaks. No markdown engine here on purpose.
+ * Render stored Markdown on read. Existing bodies need no database migration;
+ * API consumers and editing retain the original source, never generated HTML.
  */
 function render_body(?string $body): string
 {
-    $body = trim((string)$body);
-    if ($body === '') {
+    $body = (string)$body;
+    if (trim($body) === '') {
         return '';
+    }
+    require_once __DIR__ . '/Markdown.php';
+    static $markdown = null;
+    $markdown ??= new FedditMarkdown();
+    try {
+        return $markdown->text($body);
+    } catch (LengthException $error) {
+        // Excessive nesting stays readable, escaped plain text rather than
+        // breaking the page or emitting a partly rendered/untrusted fragment.
     }
     $paras = preg_split('/\n\s*\n/', $body);
     $out = '';

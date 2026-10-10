@@ -591,6 +591,38 @@ ul.flat-list.buttons li.first a { color: #888; }
     background: #f4f4f4; border: 1px solid #e0e0e0;
     padding: 0 3px; font-family: monospace; font-size: 12px;
 }
+.usertext-body.md { overflow-wrap: anywhere; }
+.usertext-body.md li { margin: 3px 0; }
+.usertext-body.md li > ul, .usertext-body.md li > ol { margin-bottom: 0; }
+.usertext-body.md blockquote {
+    border-left: 2px solid #c5c5c5;
+    margin: 0 0 10px 5px; padding: 0 8px; color: #555;
+}
+.usertext-body.md h2 { font-size: 17px; }
+.usertext-body.md h3 { font-size: 16px; }
+.usertext-body.md h4, .usertext-body.md h5, .usertext-body.md h6 { font-size: 14px; }
+.usertext-body.md h2, .usertext-body.md h3, .usertext-body.md h4,
+.usertext-body.md h5, .usertext-body.md h6 { margin: 0 0 10px; }
+.usertext-body.md pre {
+    background: #f4f4f4; border: 1px solid #e0e0e0; border-radius: 3px;
+    margin: 0 0 10px; padding: 8px; overflow-x: auto; white-space: pre;
+}
+.usertext-body.md pre code { border: 0; padding: 0; background: transparent; }
+.usertext-body.md table {
+    display: block; max-width: 100%; width: max-content; overflow-x: auto;
+    border-collapse: collapse; margin: 0 0 10px;
+}
+.usertext-body.md th, .usertext-body.md td { border: 1px solid #ddd; padding: 4px 8px; }
+.usertext-body.md th { background: #f4f4f4; text-align: left; }
+.usertext-body.md hr { border: 0; border-top: 1px solid #ddd; margin: 10px 0; }
+.usertext-body.md .md-spoiler {
+    appearance: none; border: 0; border-radius: 2px; background: #333; color: #333;
+    padding: 0 2px; font: inherit; text-align: inherit; cursor: pointer;
+}
+.usertext-body.md .md-spoiler > span { visibility: hidden; }
+.usertext-body.md .md-spoiler[aria-expanded="true"] { background: #e8e8e8; color: inherit; }
+.usertext-body.md .md-spoiler[aria-expanded="true"] > span { visibility: visible; }
+.usertext-body.md .md-spoiler:focus-visible { outline: 2px solid #369; outline-offset: 2px; }
 
 /* --------------------------------------------------------------------------
    Comments page
