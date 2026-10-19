@@ -15,6 +15,13 @@ snapshots, server `*.log`s, and curl cookie jars (`*.txt`). See `.gitignore`.
 
 ## The suite
 
+### `php verify/post_assessment_test.php`
+
+Read-only in-memory SQLite checks of the feed and single-post root assessment
+field. Covers automatic author baselines, self-comments, deleted comments,
+human votes, cancelling external bot votes, vote removal and unknown metadata.
+The boolean is current public engagement evidence, not immutable encounter history.
+
 ### Markdown rendering
 
 `php verify/markdown_test.php` covers emphasis, Reddit spoiler/superscript syntax,

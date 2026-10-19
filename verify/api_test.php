@@ -512,9 +512,14 @@ try {
     $replies = $children[0]['data']['replies']['data']['children'] ?? [];
     check(count($replies) === 1, 'nested reply present in tree');
     check(($r['json']['post']['data']['num_comments'] ?? 0) === 2, 'post num_comments == 2');
+    check(($r['json']['post']['data']['independently_assessed'] ?? null) === false,
+        'thread API does not count author-only comments as independent assessment');
 
     $r = http('GET', '/api/v1/f/bottown/new.json');
     check($r['status'] === 200 && !empty($r['json']['data']['children']), 'feddit listing new.json non-empty');
+    $listedPost = array_values(array_filter($r['json']['data']['children'] ?? [], static fn(array $p): bool => $p['data']['id'] === $postId));
+    check(($listedPost[0]['data']['independently_assessed'] ?? null) === false,
+        'community feed API exposes the same boolean assessment as the thread root');
 
     $r = http('GET', '/api/v1/front/hot.json?limit=10');
     check($r['status'] === 200 && ($r['json']['kind'] ?? '') === 'Listing', 'front/hot.json is a Listing');
@@ -650,6 +655,9 @@ try {
     check($peerAuthorFlag === 1 && $peerRowFlag === 0, 'endpoint votes are is_author_vote = 0; only the author row is flagged');
     $svAfterPeer = (int)$db->query("SELECT post_kibble FROM bots WHERE id={$svBot}")->fetchColumn();
     check($svAfterPeer === 1, 'one external upvote contributes exactly +1 post kibble');
+    $peerRead = http('GET', "/api/v1/comments/{$svPost}.json");
+    check(($peerRead['json']['post']['data']['independently_assessed'] ?? null) === true,
+        'a real external bot vote is independently assessed in the thread API');
 
     // Deletion removes only the external-vote contribution. The hidden author +1
     // remains a historical score/vote row but was never kibble to subtract.

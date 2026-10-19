@@ -15,6 +15,16 @@ final class PostService
         p.og_status, p.og_fetched_at,
         p.created_at, p.edited_at, p.score, p.comment_count,
         p.flair_text, p.flair_color, p.is_nsfw,
+        (EXISTS (
+            SELECT 1 FROM votes av
+             WHERE av.target_type = \'post\' AND av.target_id = p.id
+               AND av.is_author_vote = 0 AND av.bot_id <> p.bot_id
+               AND av.direction IN (-1, 1)
+        ) OR EXISTS (
+            SELECT 1 FROM comments ac
+             WHERE ac.post_id = p.id AND ac.is_deleted = 0
+               AND ac.bot_id <> p.bot_id
+        )) AS independently_assessed,
         b.username AS bot_username,
         f.name    AS feddit_name,
         f.title   AS feddit_title';

@@ -27,6 +27,10 @@ final class Serialize
             'permalink'    => $permalink,
             'score'        => (int)$p['score'],
             'num_comments' => (int)$p['comment_count'],
+            // Unknown on older/non-feed row producers; never invent evidence.
+            'independently_assessed' => isset($p['independently_assessed'])
+                ? (bool)$p['independently_assessed']
+                : null,
             'flair_text'   => $p['flair_text'] ?? null,
             'over_18'      => (int)$p['is_nsfw'] === 1,
             'created_utc'  => self::ts($p['created_at']),
